@@ -1,0 +1,372 @@
+'use strict';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+const state = { config: null, places: [], rating: { placeId: null, stars: 0 } };
+
+// ── API ────────────────────────────────────────────────────────────
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
+  return data;
+}
+
+const el = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'html') node.innerHTML = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child.nodeType ? child : document.createTextNode(String(child)));
+  }
+  return node;
+};
+
+const pct = (r) => (r === null || r === undefined ? null : Math.round(r * 100));
+const starText = (avg) => '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
+
+// ── 추천 카드 ──────────────────────────────────────────────────────
+function cardFor(item) {
+  const taste = pct(item.taste_ratio);
+  const metrics = [];
+
+  metrics.push(el('div', { class: 'metric' },
+    el('span', { class: 'label' }, '거리'),
+    el('span', { class: 'value' },
+      item.distance_m === null ? '알 수 없음' : `${item.distance_m}m · 도보 ${item.walk_min}분`)));
+
+  if (taste !== null) {
+    metrics.push(el('div', { class: 'metric' },
+      el('span', { class: 'label' }, '맛있어요'),
+      el('span', { class: 'meter' }, el('span', { style: `width:${taste}%` })),
+      el('span', { class: 'value' }, `${taste}%`)));
+  } else {
+    metrics.push(el('div', { class: 'metric' },
+      el('span', { class: 'label' }, '맛있어요'),
+      el('span', { class: 'muted' }, '지표 없음')));
+  }
+
+  metrics.push(el('div', { class: 'metric' },
+    el('span', { class: 'label' }, '사내 별점'),
+    item.team_count
+      ? el('span', { class: 'value' }, `${starText(item.team_avg)} ${item.team_avg} (${item.team_count}명)`)
+      : el('span', { class: 'muted' }, '아직 없음')));
+
+  return el('div', { class: 'card' },
+    el('p', { class: 'name' },
+      el('a', { href: item.map_url, target: '_blank', rel: 'noopener' }, item.name)),
+    el('div', { class: 'badges' },
+      el('span', { class: 'badge' }, item.major_category),
+      item.detail_category && item.detail_category !== item.major_category
+        ? el('span', { class: 'badge plain' }, item.detail_category) : null),
+    el('p', { class: 'muted', style: 'margin:0 0 8px' }, item.address || ''),
+    ...metrics,
+    el('p', { class: 'why' }, item.why || ''),
+    el('div', { class: 'row' },
+      el('button', { onclick: () => openRating(item) }, '⭐ 별점 남기기'),
+      el('button', { onclick: () => blockPlace(item) }, '🚫 다시 안 보기')));
+}
+
+async function draw() {
+  const btn = $('#draw');
+  btn.disabled = true;
+  btn.textContent = '뽑는 중…';
+  try {
+    const radius = $('#radius-quick').value;
+    const count = $('#count-quick').value;
+    const data = await api(`/api/recommend?radius=${radius}&count=${count}`);
+    $('#pick-note').textContent = data.note || '';
+    const cards = $('#cards');
+    cards.replaceChildren();
+    if (!data.items.length) {
+      cards.append(el('p', { class: 'empty' }, '추천할 식당이 없습니다. 설정 탭에서 식당을 먼저 수집하세요.'));
+    } else {
+      data.items.forEach((item) => cards.append(cardFor(item)));
+    }
+  } catch (err) {
+    $('#pick-note').textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '다시 뽑기';
+  }
+}
+
+async function blockPlace(item) {
+  const reason = prompt(`'${item.name}'을(를) 추천에서 뺍니다.\n이유(선택):`, '');
+  if (reason === null) return;
+  await api('/api/blocks', {
+    method: 'POST',
+    body: { place_id: item.id, reason, by: localStorage.getItem('rater') || '' },
+  });
+  await Promise.all([draw(), loadBlocks(), loadStats()]);
+}
+
+// ── 별점 ───────────────────────────────────────────────────────────
+async function openRating(item) {
+  state.rating = { placeId: item.id, stars: 0 };
+  $('#rate-title').textContent = `${item.name} — 별점 남기기`;
+  $('#rate-name').value = localStorage.getItem('rater') || '';
+  $('#rate-comment').value = '';
+  paintStars(0);
+  const box = $('#rate-existing');
+  box.replaceChildren();
+  try {
+    const summary = await api(`/api/ratings?place_id=${encodeURIComponent(item.id)}`);
+    const mine = summary.ratings.find((r) => r.rater === $('#rate-name').value);
+    if (mine) {
+      state.rating.stars = mine.stars;
+      paintStars(mine.stars);
+      $('#rate-comment').value = mine.comment || '';
+    }
+    summary.ratings.forEach((r) => box.append(
+      el('div', {}, `${starText(r.stars)} ${r.rater}${r.comment ? ' — ' + r.comment : ''}`)));
+  } catch { /* 아직 별점이 없으면 그냥 빈 목록 */ }
+  $('#rate-modal').hidden = false;
+}
+
+function paintStars(value) {
+  $$('#rate-stars button').forEach((b) => b.classList.toggle('on', Number(b.dataset.v) <= value));
+}
+
+async function saveRating() {
+  const rater = $('#rate-name').value.trim();
+  if (!rater) return alert('이름을 입력해 주세요.');
+  if (!state.rating.stars) return alert('별점을 선택해 주세요.');
+  localStorage.setItem('rater', rater);
+  await api('/api/ratings', {
+    method: 'POST',
+    body: {
+      place_id: state.rating.placeId, rater, stars: state.rating.stars,
+      comment: $('#rate-comment').value.trim(),
+    },
+  });
+  $('#rate-modal').hidden = true;
+  await Promise.all([loadHistory(), loadPlaces(), loadStats()]);
+}
+
+// ── 목록/기록/설정 ─────────────────────────────────────────────────
+async function loadHistory() {
+  const data = await api('/api/history?limit=20');
+  const box = $('#history');
+  box.replaceChildren();
+  if (!data.items.length) {
+    box.append(el('p', { class: 'empty' }, '아직 추천 기록이 없습니다.'));
+    return;
+  }
+  data.items.forEach((batch) => {
+    box.append(el('div', { class: 'batch' },
+      el('div', { class: 'when' }, `${batch.picked_on} · ${new Date(batch.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`),
+      el('ul', {}, batch.items.map((it) => el('li', {},
+        `${it.name} (${it.detail_category || it.major_category})`,
+        it.team_count ? el('span', { class: 'muted' }, ` ${starText(it.team_avg)} ${it.team_avg}`) : null,
+        ' ',
+        el('button', {
+          style: 'padding:1px 7px;font-size:.75rem',
+          onclick: () => openRating({ id: it.place_id, name: it.name }),
+        }, '별점'))))));
+  });
+}
+
+function placeRow(p) {
+  const taste = pct(p.taste_ratio);
+  return el('div', { class: `place-row${p.blocked ? ' blocked' : ''}` },
+    el('span', { class: 'grow' },
+      el('div', {}, el('a', { href: p.map_url, target: '_blank', rel: 'noopener', style: 'color:inherit' }, p.name),
+        ' ', el('span', { class: 'muted' }, `${p.major_category}${p.detail_category && p.detail_category !== p.major_category ? ' · ' + p.detail_category : ''}`)),
+      el('div', { class: 'muted' }, p.address || '')),
+    el('span', { class: 'muted', style: 'white-space:nowrap' },
+      [p.distance_m !== null ? `${p.distance_m}m` : '',
+       taste !== null ? `맛${taste}%` : '',
+       p.team_count ? `★${p.team_avg}` : ''].filter(Boolean).join(' · ')),
+    el('button', {
+      style: 'padding:4px 9px;font-size:.78rem',
+      onclick: async () => {
+        if (p.blocked) await api(`/api/blocks?place_id=${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+        else await api('/api/blocks', { method: 'POST', body: { place_id: p.id, by: localStorage.getItem('rater') || '' } });
+        await Promise.all([loadPlaces(), loadBlocks(), loadStats()]);
+      },
+    }, p.blocked ? '되돌리기' : '제외'));
+}
+
+function renderPlaces() {
+  const q = $('#place-search').value.trim().toLowerCase();
+  const showBlocked = $('#show-blocked').checked;
+  const items = state.places.filter((p) => {
+    if (!showBlocked && p.blocked) return false;
+    if (!q) return true;
+    return `${p.name} ${p.major_category} ${p.detail_category} ${p.address}`.toLowerCase().includes(q);
+  });
+  const box = $('#places');
+  box.replaceChildren();
+  $('#place-count').textContent = `${items.length}곳`;
+  if (!items.length) box.append(el('p', { class: 'empty' }, '표시할 식당이 없습니다.'));
+  items.forEach((p) => box.append(placeRow(p)));
+}
+
+async function loadPlaces() {
+  const data = await api('/api/places?radius=all');
+  state.places = data.items;
+  renderPlaces();
+}
+
+async function loadBlocks() {
+  const data = await api('/api/blocks');
+  const box = $('#blocks');
+  box.replaceChildren();
+  $('#block-count').textContent = data.items.length ? `(${data.items.length}곳)` : '';
+  if (!data.items.length) {
+    box.append(el('p', { class: 'muted' }, '제외된 식당이 없습니다.'));
+    return;
+  }
+  data.items.forEach((b) => box.append(el('div', { class: 'place-row' },
+    el('span', { class: 'grow' },
+      el('div', {}, b.name, ' ', el('span', { class: 'muted' }, b.detail_category || b.major_category || '')),
+      el('div', { class: 'muted' }, [b.reason, b.blocked_by && `by ${b.blocked_by}`].filter(Boolean).join(' · '))),
+    el('button', {
+      style: 'padding:4px 9px;font-size:.78rem',
+      onclick: async () => {
+        await api(`/api/blocks?place_id=${encodeURIComponent(b.place_id)}`, { method: 'DELETE' });
+        await Promise.all([loadBlocks(), loadPlaces(), loadStats()]);
+      },
+    }, '되돌리기'))));
+}
+
+async function loadStats() {
+  const s = await api('/api/stats');
+  const box = $('#stats');
+  box.replaceChildren();
+  const cells = [
+    ['반경 내 식당', s.places_in_radius], ['전체 등록', s.places_total],
+    ['맛있어요 지표', s.places_with_taste], ['별점 있는 곳', s.rated_places],
+    ['제외', s.blocked],
+  ];
+  cells.forEach(([label, value]) => box.append(
+    el('div', { class: 'stat' }, el('b', {}, String(value)), el('span', {}, label))));
+  s.by_major.slice(0, 6).forEach((row) => box.append(
+    el('div', { class: 'stat' }, el('b', {}, String(row.cnt)), el('span', {}, row.major))));
+}
+
+async function loadConfig() {
+  const cfg = await api('/api/config');
+  state.config = cfg;
+  $('#subtitle').textContent = `${cfg.office_name} 기준 ${cfg.radius_m}m 이내에서 골라 드립니다.`;
+  $('#cfg-office-name').value = cfg.office_name;
+  $('#cfg-area').value = cfg.area_keyword || '';
+  $('#cfg-lat').value = cfg.office_lat;
+  $('#cfg-lng').value = cfg.office_lng;
+  $('#cfg-radius').value = cfg.radius_m;
+  $('#cfg-count').value = cfg.recommend_count;
+  $('#radius-quick').value = [300, 500, 800, 1200].includes(cfg.radius_m) ? cfg.radius_m : 500;
+  $('#count-quick').value = Math.min(5, Math.max(2, cfg.recommend_count));
+  const warn = $('#sync-warn');
+  const notes = [];
+  if (!cfg.has_naver_keys) notes.push('네이버 API 키가 없어 식당 수집을 실행할 수 없습니다. .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 넣어 주세요.');
+  if (!cfg.review_scrape_enabled) notes.push("'맛있어요' 비율 수집이 꺼져 있습니다 (.env 의 ENABLE_PLACE_REVIEW_SCRAPE=1). 공식 API 가 아니라 언제든 막힐 수 있습니다.");
+  warn.textContent = notes.join('\n');
+  warn.hidden = !notes.length;
+  $('#run-sync').disabled = !cfg.has_naver_keys;
+  $('#run-enrich').disabled = !cfg.review_scrape_enabled;
+}
+
+// ── 수집 진행 폴링 ─────────────────────────────────────────────────
+let pollTimer = null;
+function pollSync() {
+  clearInterval(pollTimer);
+  $('#sync-progress').hidden = false;
+  pollTimer = setInterval(async () => {
+    const s = await api('/api/sync');
+    const ratio = s.total ? Math.round((s.done / s.total) * 100) : 0;
+    $('#sync-bar').style.width = `${ratio}%`;
+    $('#sync-msg').textContent = s.error ? `오류: ${s.error}` : `${s.message} (${s.done}/${s.total})`;
+    if (!s.running) {
+      clearInterval(pollTimer);
+      await Promise.all([loadPlaces(), loadStats()]);
+    }
+  }, 900);
+}
+
+// ── 초기화 ─────────────────────────────────────────────────────────
+function initTabs() {
+  $$('.tab').forEach((tab) => tab.addEventListener('click', () => {
+    $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+    $$('.panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${tab.dataset.tab}`));
+    if (tab.dataset.tab === 'history') loadHistory();
+    if (tab.dataset.tab === 'places') loadPlaces();
+    if (tab.dataset.tab === 'admin') { loadBlocks(); loadStats(); loadConfig(); }
+  }));
+}
+
+function initEvents() {
+  $('#draw').addEventListener('click', draw);
+  $('#place-search').addEventListener('input', renderPlaces);
+  $('#show-blocked').addEventListener('change', renderPlaces);
+
+  $$('#rate-stars button').forEach((b) => b.addEventListener('click', () => {
+    state.rating.stars = Number(b.dataset.v);
+    paintStars(state.rating.stars);
+  }));
+  $('#rate-cancel').addEventListener('click', () => { $('#rate-modal').hidden = true; });
+  $('#rate-save').addEventListener('click', () => saveRating().catch((e) => alert(e.message)));
+  $('#rate-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'rate-modal') $('#rate-modal').hidden = true;
+  });
+
+  $('#cfg-save').addEventListener('click', async () => {
+    await api('/api/config', {
+      method: 'POST',
+      body: {
+        office_name: $('#cfg-office-name').value, area_keyword: $('#cfg-area').value,
+        office_lat: $('#cfg-lat').value, office_lng: $('#cfg-lng').value,
+        radius_m: $('#cfg-radius').value, recommend_count: $('#cfg-count').value,
+      },
+    });
+    $('#cfg-saved').textContent = '저장했습니다';
+    setTimeout(() => { $('#cfg-saved').textContent = ''; }, 2000);
+    await loadConfig();
+  });
+
+  $('#run-sync').addEventListener('click', async () => {
+    try {
+      await api('/api/sync', { method: 'POST', body: { area: $('#cfg-area').value } });
+      pollSync();
+    } catch (e) { alert(e.message); }
+  });
+  $('#run-enrich').addEventListener('click', async () => {
+    try {
+      await api('/api/enrich', { method: 'POST', body: { limit: 60 } });
+      pollSync();
+    } catch (e) { alert(e.message); }
+  });
+
+  $('#add-place').addEventListener('click', async () => {
+    const [lat, lng] = ($('#add-coord').value || '').split(',').map((v) => parseFloat(v.trim()));
+    try {
+      await api('/api/places', {
+        method: 'POST',
+        body: {
+          name: $('#add-name').value, address: $('#add-addr').value,
+          category: $('#add-cat').value,
+          lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+        },
+      });
+      $('#add-msg').textContent = '추가했습니다';
+      ['#add-name', '#add-addr', '#add-cat', '#add-coord'].forEach((s) => { $(s).value = ''; });
+      setTimeout(() => { $('#add-msg').textContent = ''; }, 2000);
+      await Promise.all([loadPlaces(), loadStats()]);
+    } catch (e) { alert(e.message); }
+  });
+}
+
+initTabs();
+initEvents();
+loadConfig().catch((e) => { $('#pick-note').textContent = e.message; });
