@@ -387,10 +387,16 @@ async function loadConfig() {
   $('#count-quick').value = [2,3,4,5,6,8,10].includes(cfg.recommend_count) ? cfg.recommend_count : 3;
   const warn = $('#sync-warn');
   const notes = [];
-  if (!cfg.has_naver_keys) notes.push('네이버 API 키가 없어 식당 수집을 실행할 수 없습니다. .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 넣어 주세요.');
+  if (!cfg.has_naver_keys) notes.push('네이버 API 키가 없어 [주변 식당 수집]은 쓸 수 없습니다. 붙여넣기 등록은 그대로 되고 거리만 빕니다.');
   if (!cfg.review_scrape_enabled) notes.push("'맛있어요' 비율 수집이 꺼져 있습니다 (.env 의 ENABLE_PLACE_REVIEW_SCRAPE=1). 공식 API 가 아니라 언제든 막힐 수 있습니다.");
   warn.textContent = notes.join('\n');
   warn.hidden = !notes.length;
+  const keyMsg = $('#naver-keys-msg');
+  if (cfg.has_naver_keys && !keyMsg.textContent) {
+    keyMsg.textContent = cfg.naver_keys_from_env
+      ? '키가 .env 에 들어 있습니다. 여기에 넣으면 그 값이 우선합니다.'
+      : '키가 저장되어 있습니다.';
+  }
   renderBudget('#naver-budget', cfg.naver_budget, '네이버');
   renderBudget('#google-budget', cfg.google_budget, '구글');
   $('#run-sync').disabled = !cfg.has_naver_keys;
@@ -465,6 +471,24 @@ function initEvents() {
     try {
       await api('/api/enrich', { method: 'POST', body: { limit: 60 } });
       pollSync();
+    } catch (e) { alert(e.message); }
+  });
+
+  $('#save-naver-keys').addEventListener('click', async () => {
+    const id = $('#naver-id').value.trim();
+    const secret = $('#naver-secret').value.trim();
+    const msg = $('#naver-keys-msg');
+    if (!id || !secret) return alert('Client ID 와 Client Secret 을 모두 넣어 주세요.');
+    try {
+      const cfg = await api('/api/config', {
+        method: 'POST', body: { naver_client_id: id, naver_client_secret: secret },
+      });
+      $('#naver-secret').value = '';          // 화면에 남겨 두지 않는다
+      msg.textContent = '';
+      await loadConfig();
+      msg.textContent = cfg.has_naver_keys
+        ? '저장했습니다. 이제 붙여넣기 등록이 거리까지 채웁니다.'
+        : '저장은 됐지만 키가 비어 있습니다. 다시 확인해 주세요.';
     } catch (e) { alert(e.message); }
   });
 

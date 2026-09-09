@@ -239,3 +239,50 @@ class ImportPreviewTestCase(ServerTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(data["names"], ["투썸플레이스 마포대로점"])
         self.assertEqual(data["dropped_count"], 0)
+
+
+class NaverKeyFromScreenTestCase(ServerTestCase):
+    """API 키를 .env 대신 설정 화면에서 넣을 수 있어야 한다."""
+
+    def tearDown(self):
+        for key in ("naver_client_id", "naver_client_secret"):
+            self.state.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        self.state.conn.commit()
+
+    def test_키를_저장하면_has_naver_keys_가_켜진다(self):
+        _, before = request(f"{self.base}/api/config")
+        self.assertFalse(before["has_naver_keys"])
+        status, cfg = request(f"{self.base}/api/config", "POST",
+                              {"naver_client_id": "abc", "naver_client_secret": "xyz"})
+        self.assertEqual(status, 200)
+        self.assertTrue(cfg["has_naver_keys"])
+
+    def test_키_값은_화면으로_돌려주지_않는다(self):
+        request(f"{self.base}/api/config", "POST",
+                {"naver_client_id": "abc", "naver_client_secret": "xyz"})
+        _, cfg = request(f"{self.base}/api/config")
+        self.assertNotIn("naver_client_id", cfg)
+        self.assertNotIn("naver_client_secret", cfg)
+        self.assertNotIn("xyz", json.dumps(cfg))
+
+    def test_앞뒤_공백은_떼고_저장한다(self):
+        request(f"{self.base}/api/config", "POST",
+                {"naver_client_id": "  abc \n", "naver_client_secret": " xyz "})
+        self.assertEqual(self.state.naver_client_id, "abc")
+        self.assertEqual(self.state.naver_client_secret, "xyz")
+
+    def test_빈_값으로_저장하면_키가_없는_상태로_돌아간다(self):
+        request(f"{self.base}/api/config", "POST",
+                {"naver_client_id": "abc", "naver_client_secret": "xyz"})
+        status, cfg = request(f"{self.base}/api/config", "POST",
+                              {"naver_client_id": "", "naver_client_secret": ""})
+        self.assertEqual(status, 200)
+        self.assertFalse(cfg["has_naver_keys"])
+
+    def test_키를_넣으면_사용량_표시가_생긴다(self):
+        _, before = request(f"{self.base}/api/config")
+        self.assertIsNone(before["naver_budget"])
+        _, cfg = request(f"{self.base}/api/config", "POST",
+                         {"naver_client_id": "abc", "naver_client_secret": "xyz"})
+        self.assertIsNotNone(cfg["naver_budget"])
+        self.assertEqual(cfg["naver_budget"]["used"], 0)

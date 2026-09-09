@@ -102,6 +102,28 @@
     </div>
 
     <div class="card block">
+      <h3>네이버 API 키 <span class="muted" style="font-weight:400">(선택)</span></h3>
+      <p class="hint">넣으면 식당마다 좌표를 받아와 <b>회사에서의 거리</b>를 채웁니다.
+        안 넣어도 붙여넣기 등록·추천·별점은 그대로 됩니다.
+        <a href="https://www.ncloud.com/product/applicationService/naverApiHub" target="_blank"
+           rel="noopener">NAVER API HUB</a> 에서 <b>Application → 인증 정보</b>를 열면 나옵니다.</p>
+      <div class="grid2">
+        <label>Client ID
+          <input id="naver-id" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="인증 정보에서 복사해 붙여넣기">
+        </label>
+        <label>Client Secret
+          <input id="naver-secret" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="인증 정보에서 복사해 붙여넣기">
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="save-naver-keys" class="primary">키 저장</button>
+        <span class="muted" id="naver-keys-msg"></span>
+      </div>
+    </div>
+
+    <div class="card block">
       <h3>네이버 지도 목록 붙여넣기</h3>
       <p class="hint">네이버 지도에서 <b>음식점</b>으로 검색한 목록을
         <b>드래그해서 그대로 복사·붙여넣기</b> 하세요. 별점·주소·리뷰·광고가 섞여 있어도

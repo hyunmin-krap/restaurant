@@ -64,6 +64,20 @@ class AppState:
     def area_keyword(self) -> str:
         return self.setting_str("area_keyword", "")
 
+    # API 키도 화면에서 넣을 수 있게 한다. .env 를 열지 않아도 되도록.
+    # 화면에서 넣은 값이 .env 보다 우선한다.
+    @property
+    def naver_client_id(self) -> str:
+        return self.setting_str("naver_client_id", self.config.naver_client_id)
+
+    @property
+    def naver_client_secret(self) -> str:
+        return self.setting_str("naver_client_secret", self.config.naver_client_secret)
+
+    @property
+    def has_naver_keys(self) -> bool:
+        return bool(self.naver_client_id and self.naver_client_secret)
+
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str) -> None:
@@ -95,7 +109,9 @@ def get_config(h: "LunchHandler", q, body):
         "radius_m": s.radius_m,
         "recommend_count": s.recommend_count,
         "area_keyword": s.area_keyword,
-        "has_naver_keys": s.config.has_naver_keys,
+        "has_naver_keys": s.has_naver_keys,
+        # 키 값은 화면으로 돌려주지 않는다. 넣었는지 여부만 알려 준다.
+        "naver_keys_from_env": bool(s.config.has_naver_keys),
         "review_scrape_enabled": s.config.enable_place_review_scrape,
         "has_google_key": s.config.has_google_key,
         "google_budget": (budget_mod.status(s.conn, "google", s.config.google_monthly_call_limit)
@@ -103,7 +119,7 @@ def get_config(h: "LunchHandler", q, body):
         "naver_budget": (budget_mod.status(
             s.conn, "naver",
             s.config.naver_monthly_call_limit, s.config.naver_daily_call_limit,
-        ) if s.config.has_naver_keys else None),
+        ) if s.has_naver_keys else None),
     }
 
 
@@ -111,9 +127,14 @@ def get_config(h: "LunchHandler", q, body):
 def post_config(h: "LunchHandler", q, body):
     allowed = {"office_name", "office_lat", "office_lng", "radius_m",
                "recommend_count", "area_keyword"}
+    secrets = {"naver_client_id", "naver_client_secret"}
     for key, value in body.items():
         if key in allowed and value not in (None, ""):
             dbm.set_setting(h.state.conn, key, str(value))
+        elif key in secrets and value is not None:
+            # 붙여넣을 때 앞뒤 공백이 딸려 오는 일이 잦다.
+            # 빈 값으로 저장하면 .env 값으로 되돌아간다.
+            dbm.set_setting(h.state.conn, key, str(value).strip())
     return get_config(h, q, body)
 
 
@@ -390,9 +411,7 @@ def _naver_provider(s: "AppState") -> NaverLocalProvider:
         with s.lock:
             budget_mod.consume(s.conn, "naver", 1)
 
-    return NaverLocalProvider(
-        s.config.naver_client_id, s.config.naver_client_secret, guard=guard
-    )
+    return NaverLocalProvider(s.naver_client_id, s.naver_client_secret, guard=guard)
 
 
 # ── 유틸 ────────────────────────────────────────────────────────────
@@ -502,8 +521,9 @@ def serve(config: Config = CONFIG) -> None:
     shown = "localhost" if config.host in {"0.0.0.0", ""} else config.host
     print(f"🍚 점심 뽑기 서버 시작: http://{shown}:{config.port}")
     print(f"   DB: {config.db_path}")
-    if not config.has_naver_keys:
-        print("   ⚠ 네이버 API 키가 없습니다. 식당 수집은 .env 설정 후 가능합니다.")
+    if not state.has_naver_keys:
+        print("   ℹ 네이버 API 키가 없습니다. 붙여넣기 등록은 그대로 되고 거리만 빕니다.")
+        print("     키가 있으면 설정 탭에 붙여넣으세요 (.env 를 안 열어도 됩니다).")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
