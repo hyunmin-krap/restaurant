@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app import budget as budget_mod  # noqa: E402
 from app import db as dbm  # noqa: E402
 from app.config import CONFIG  # noqa: E402
 from app.providers import (  # noqa: E402
@@ -45,13 +46,20 @@ def main() -> int:
             return 1
         print("영업시간 소스:", "구글 Places (공식)" if google else "네이버 플레이스 (비공식)")
         print("맛있어요 비율:", "네이버 플레이스" if reviewer else "안 함")
+        if google:
+            b = budget_mod.status(conn, CONFIG.google_monthly_call_limit)
+            print(f"구글 호출: 이번 달 {b['used']}/{b['limit']}건 사용 (남은 {b['remaining']}건)")
         filled = enrich_places(
             conn, reviewer, google, limit=args.limit,
+            google_call_limit=CONFIG.google_monthly_call_limit,
             state=state, only_missing=not args.refresh,
         )
         for line in state.log:
             print(" ", line)
         print(f"\n{filled}곳을 갱신했습니다 (맛있어요 비율 · 점심 영업 여부).")
+        if google:
+            b = budget_mod.status(conn, CONFIG.google_monthly_call_limit)
+            print(f"구글 호출 누적: {b['used']}/{b['limit']}건")
         return 0
 
     area = args.area or dbm.get_setting(conn, "area_keyword")

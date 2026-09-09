@@ -108,3 +108,125 @@ class TestProvider(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCallBudget(unittest.TestCase):
+    """구글 무료 한도(월 1,000건)를 넘지 않도록 앱이 스스로 막는다."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from app import db as dbm
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = dbm.connect(Path(self.tmp.name) / "b.db")
+        dbm.init_db(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
+
+    def test_starts_empty(self):
+        from app import budget
+        self.assertEqual(budget.used(self.conn), 0)
+        self.assertEqual(budget.remaining(self.conn, 900), 900)
+
+    def test_consume_accumulates(self):
+        from app import budget
+        budget.consume(self.conn, 10)
+        budget.consume(self.conn, 5)
+        self.assertEqual(budget.used(self.conn), 15)
+        self.assertEqual(budget.remaining(self.conn, 900), 885)
+
+    def test_remaining_never_negative(self):
+        from app import budget
+        budget.consume(self.conn, 5000)
+        self.assertEqual(budget.remaining(self.conn, 900), 0)
+        self.assertTrue(budget.status(self.conn, 900)["exhausted"])
+
+    def test_counter_is_per_month(self):
+        from datetime import datetime, timezone
+        from app import budget
+        sept = datetime(2026, 9, 15, tzinfo=timezone.utc)
+        octo = datetime(2026, 10, 2, tzinfo=timezone.utc)
+        budget.consume(self.conn, 700, now=sept)
+        self.assertEqual(budget.used(self.conn, now=sept), 700)
+        self.assertEqual(budget.used(self.conn, now=octo), 0)   # 달이 바뀌면 초기화
+
+    def test_corrupt_counter_is_treated_as_zero(self):
+        from app import budget, db as dbm
+        dbm.set_setting(self.conn, budget.month_key(), "이상한값")
+        self.assertEqual(budget.used(self.conn), 0)
+
+
+class FakeGoogle:
+    """호출 횟수만 세는 가짜 구글 provider."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def fetch_hours(self, name, address="", lat=None, lng=None, google_place_id=None):
+        self.calls += 1
+        return {"lunch_open": False, "text": "매일 17:00-23:00", "google_place_id": f"g{self.calls}"}
+
+
+class TestBudgetStopsCalls(unittest.TestCase):
+    """한도에 걸리면 구글 호출을 실제로 멈춰야 한다."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from app import db as dbm
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = dbm.connect(Path(self.tmp.name) / "e.db")
+        dbm.init_db(self.conn)
+        for i in range(6):
+            dbm.upsert_place(self.conn, {
+                "id": f"p{i}", "name": f"가게{i}", "road_address": "주소", "address": "주소",
+                "lat": 37.543, "lng": 126.951, "raw_category": "음식점>한식",
+                "major_category": "한식", "detail_category": "백반",
+                "phone": "", "link": "", "naver_place_id": None,
+                "distance_m": 100.0 + i, "source": "test",
+            })
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
+
+    def test_stops_at_the_limit(self):
+        from app import budget
+        from app.sync import enrich_places
+        google = FakeGoogle()
+        enrich_places(self.conn, reviewer=None, google=google, limit=10, google_call_limit=3)
+        self.assertEqual(google.calls, 3, "한도를 넘겨 호출했다")
+        self.assertEqual(budget.used(self.conn), 3)
+
+    def test_counts_every_call(self):
+        from app import budget
+        from app.sync import enrich_places
+        google = FakeGoogle()
+        enrich_places(self.conn, reviewer=None, google=google, limit=10, google_call_limit=900)
+        self.assertEqual(google.calls, 6)
+        self.assertEqual(budget.used(self.conn), 6)
+
+    def test_writes_hours_and_google_id(self):
+        from app.sync import enrich_places
+        enrich_places(self.conn, reviewer=None, google=FakeGoogle(), limit=2, google_call_limit=900)
+        row = self.conn.execute(
+            "SELECT lunch_open, lunch_source, business_hours, google_place_id "
+            "FROM places WHERE id='p0'").fetchone()
+        self.assertEqual(row["lunch_open"], 0)
+        self.assertEqual(row["lunch_source"], "google_places")
+        self.assertTrue(row["google_place_id"])
+
+    def test_manual_marks_are_not_overwritten(self):
+        from app import db as dbm
+        from app.sync import enrich_places
+        dbm.set_lunch_open(self.conn, "p0", True, "manual")
+        self.conn.commit()
+        enrich_places(self.conn, reviewer=None, google=FakeGoogle(), limit=10,
+                      google_call_limit=900, only_missing=False)
+        row = self.conn.execute(
+            "SELECT lunch_open, lunch_source FROM places WHERE id='p0'").fetchone()
+        self.assertEqual(row["lunch_open"], 1, "사람이 표시한 값을 자동 판정이 덮어썼다")
+        self.assertEqual(row["lunch_source"], "manual")

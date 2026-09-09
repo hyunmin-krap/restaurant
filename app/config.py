@@ -55,6 +55,7 @@ class Config:
     naver_client_id: str
     naver_client_secret: str
     google_maps_api_key: str
+    google_monthly_call_limit: int
     enable_place_review_scrape: bool
     host: str
     port: int
@@ -82,6 +83,7 @@ def load_config() -> Config:
         naver_client_id=os.environ.get("NAVER_CLIENT_ID", "").strip(),
         naver_client_secret=os.environ.get("NAVER_CLIENT_SECRET", "").strip(),
         google_maps_api_key=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
+        google_monthly_call_limit=_int("GOOGLE_MONTHLY_CALL_LIMIT", 900),
         enable_place_review_scrape=_bool("ENABLE_PLACE_REVIEW_SCRAPE", False),
         host=os.environ.get("HOST", "0.0.0.0"),
         port=_int("PORT", 8000),

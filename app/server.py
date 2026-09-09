@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
+from . import budget as budget_mod
 from . import db as dbm
 from . import service
 from .config import CONFIG, Config
@@ -95,6 +96,8 @@ def get_config(h: "LunchHandler", q, body):
         "has_naver_keys": s.config.has_naver_keys,
         "review_scrape_enabled": s.config.enable_place_review_scrape,
         "has_google_key": s.config.has_google_key,
+        "google_budget": (budget_mod.status(s.conn, s.config.google_monthly_call_limit)
+                          if s.config.has_google_key else None),
     }
 
 
@@ -322,12 +325,14 @@ def post_enrich(h: "LunchHandler", q, body):
     s.sync_state = SyncState()
     run_in_thread(
         partial(enrich_places, s.conn, reviewer, google, limit,
+                s.config.google_monthly_call_limit,
                 state=s.sync_state, lock=s.lock),
         s.sync_state,
     )
     return {"started": True, "limit": limit,
             "hours_source": "google" if google else "naver",
-            "taste": bool(reviewer)}
+            "taste": bool(reviewer),
+            "google_budget": budget_mod.status(s.conn, s.config.google_monthly_call_limit)}
 
 
 # ── 유틸 ────────────────────────────────────────────────────────────

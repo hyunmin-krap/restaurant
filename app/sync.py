@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from . import budget as budget_mod
 from . import db as dbm
 from .categories import classify
 from .providers import (
@@ -80,6 +81,7 @@ def enrich_places(
     reviewer: NaverPlaceReviewProvider | None = None,
     google: GooglePlacesProvider | None = None,
     limit: int = 50,
+    google_call_limit: int = 900,
     state: SyncState | None = None,
     lock: threading.Lock | None = None,
     only_missing: bool = True,
@@ -106,14 +108,24 @@ def enrich_places(
     rows = conn.execute(sql, (limit,)).fetchall()
     state.total = len(rows)
     filled = 0
+    budget_warned = False
 
     for idx, row in enumerate(rows, start=1):
         state.done = idx
         address = row["road_address"] or row["address"] or ""
         info: dict = {}
 
-        # 1순위: 구글 공식 API 로 영업시간
+        # 1순위: 구글 공식 API 로 영업시간 (이번 달 호출 한도 안에서만)
+        if google is not None and budget_mod.remaining(conn, google_call_limit) <= 0:
+            if not budget_warned:
+                budget_warned = True
+                state.log.append(
+                    f"이번 달 구글 호출 한도({google_call_limit}건)를 다 썼습니다. "
+                    "남은 곳은 네이버 쪽으로 처리합니다."
+                )
+            google = None
         if google is not None:
+            budget_mod.consume(conn, 1)
             hours = google.fetch_hours(
                 name=row["name"], address=address,
                 lat=row["lat"], lng=row["lng"],
