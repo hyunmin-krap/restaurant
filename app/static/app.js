@@ -454,40 +454,70 @@ function initEvents() {
   // 붙여넣는 대로 상호명을 뽑아 미리 보여 준다
   let previewTimer = null;
   let previewNames = [];
+
+  function importOptions() {
+    return {
+      drop_cafe: $('#import-drop-cafe').checked,
+      drop_pricey: $('#import-drop-pricey').checked,
+    };
+  }
+
+  async function refreshPreview() {
+    const text = $('#import-text').value;
+    const box = $('#import-preview');
+    if (!text.trim()) {
+      box.hidden = true; previewNames = []; $('#run-import').disabled = true;
+      $('#import-msg').textContent = '';
+      return;
+    }
+    try {
+      const data = await api('/api/import/preview',
+        { method: 'POST', body: { text, ...importOptions() } });
+      previewNames = data.names;
+      $('#run-import').disabled = !data.count || !(state.config && state.config.has_naver_keys);
+      const needsKeys = data.count && !(state.config && state.config.has_naver_keys);
+
+      // 걸러 낸 곳은 이유별로 묶어서 접어 둔다
+      const groups = new Map();
+      (data.dropped || []).forEach((d) => {
+        if (!groups.has(d.reason)) groups.set(d.reason, []);
+        groups.get(d.reason).push(d.name);
+      });
+      const droppedBox = data.dropped_count
+        ? el('details', { class: 'preview-dropped' },
+            el('summary', {}, `자동으로 뺀 곳 ${data.dropped_count}곳`),
+            ...[...groups.entries()].map(([reason, names]) =>
+              el('div', { class: 'preview-group' },
+                el('span', { class: 'muted' }, `${reason} ${names.length}곳 — `),
+                names.join(', '))))
+        : null;
+
+      box.replaceChildren(
+        el('div', { class: 'preview-head' },
+          data.count ? `식당 ${data.count}곳을 찾았습니다` : '상호명을 찾지 못했습니다',
+          data.count
+            ? el('span', { class: 'muted' }, ' — 아래 목록이 맞으면 등록하세요')
+            : el('span', { class: 'muted' }, ' — 네이버 지도 목록을 그대로 붙여넣어 보세요')),
+        needsKeys
+          ? el('p', { class: 'warn', style: 'margin:0 0 8px' },
+              '등록하려면 네이버 검색 API 키가 필요합니다 (좌표·거리·분류를 채우는 데 씁니다). 무료이고 카드 등록도 필요 없습니다.')
+          : null,
+        el('div', { class: 'preview-names' },
+          ...data.names.map((n) => el('span', { class: 'pill' }, n))),
+        droppedBox);
+      box.hidden = false;
+    } catch (e) {
+      box.replaceChildren(el('div', { class: 'warn' }, e.message));
+      box.hidden = false;
+    }
+  }
+
   $('#import-text').addEventListener('input', () => {
     clearTimeout(previewTimer);
-    previewTimer = setTimeout(async () => {
-      const text = $('#import-text').value;
-      const box = $('#import-preview');
-      if (!text.trim()) {
-        box.hidden = true; previewNames = []; $('#run-import').disabled = true;
-        $('#import-msg').textContent = '';
-        return;
-      }
-      try {
-        const data = await api('/api/import/preview', { method: 'POST', body: { text } });
-        previewNames = data.names;
-        $('#run-import').disabled = !data.count || !(state.config && state.config.has_naver_keys);
-        const needsKeys = data.count && !(state.config && state.config.has_naver_keys);
-        box.replaceChildren(
-          el('div', { class: 'preview-head' },
-            data.count ? `상호명 ${data.count}곳을 찾았습니다` : '상호명을 찾지 못했습니다',
-            data.count
-              ? el('span', { class: 'muted' }, ' — 아래 목록이 맞으면 등록하세요')
-              : el('span', { class: 'muted' }, ' — 네이버 지도 목록을 그대로 붙여넣어 보세요')),
-          needsKeys
-            ? el('p', { class: 'warn', style: 'margin:0 0 8px' },
-                '등록하려면 네이버 검색 API 키가 필요합니다 (좌표·분류를 채우는 데 씁니다). 무료이고 카드 등록도 필요 없습니다.')
-            : null,
-          el('div', { class: 'preview-names' },
-            ...data.names.map((n) => el('span', { class: 'pill' }, n))));
-        box.hidden = false;
-      } catch (e) {
-        box.replaceChildren(el('div', { class: 'warn' }, e.message));
-        box.hidden = false;
-      }
-    }, 350);
+    previewTimer = setTimeout(refreshPreview, 350);
   });
+  $('#import-drop-cafe').addEventListener('change', refreshPreview);
+  $('#import-drop-pricey').addEventListener('change', refreshPreview);
 
   $('#run-import').addEventListener('click', async () => {
     const text = $('#import-text').value.trim();
@@ -497,7 +527,7 @@ function initEvents() {
     try {
       await api('/api/import', {
         method: 'POST',
-        body: { text, mark_others_no_lunch: $('#import-exclusive').checked },
+        body: { text, mark_others_no_lunch: $('#import-exclusive').checked, ...importOptions() },
       });
       $('#import-msg').textContent = `${previewNames.length}곳 등록 중…`;
       pollSync();

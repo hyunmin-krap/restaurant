@@ -276,3 +276,7 @@ a.btn:hover { border-color: var(--accent); color: var(--accent); }
   border-radius: 50%; background: var(--accent); color: #fff; font-size: .68rem; font-weight: 700;
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.preview-dropped { margin-top: 10px; font-size: 13px; }
+.preview-dropped summary { cursor: pointer; color: var(--muted); }
+.preview-group { margin: 6px 0 0; line-height: 1.6; color: var(--muted); }

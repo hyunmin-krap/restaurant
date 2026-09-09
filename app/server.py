@@ -14,7 +14,7 @@ from typing import Any, Callable
 from . import budget as budget_mod
 from . import db as dbm
 from . import service
-from .paste import extract_names
+from .paste import extract_entries
 from .config import CONFIG, Config
 from .providers import (
     GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
@@ -288,7 +288,12 @@ def post_import(h: "LunchHandler", q, body):
     s = h.state
     if s.sync_state.running:
         raise ApiError(409, "이미 작업이 진행 중입니다.")
-    names = extract_names(body.get("text") or "")
+    keep, _dropped = extract_entries(
+        body.get("text") or "",
+        drop_cafe=body.get("drop_cafe", True),
+        drop_pricey=body.get("drop_pricey", True),
+    )
+    names = [e["name"] for e in keep]
     if not names:
         raise ApiError(400, "상호명을 찾지 못했습니다. 네이버 지도 목록을 그대로 붙여넣어 보세요.")
     try:
@@ -299,7 +304,7 @@ def post_import(h: "LunchHandler", q, body):
     s.sync_state = SyncState()
     run_in_thread(
         partial(import_named_places, s.conn, provider, names, lat, lng,
-                s.area_keyword, bool(body.get("mark_others_no_lunch")),
+                s.area_keyword, bool(body.get("mark_others_no_lunch")), s.radius_m,
                 state=s.sync_state, lock=s.lock),
         s.sync_state,
     )
@@ -308,9 +313,22 @@ def post_import(h: "LunchHandler", q, body):
 
 @route("POST", "/api/import/preview")
 def post_import_preview(h: "LunchHandler", q, body):
-    """붙여넣은 덩어리에서 상호명을 뽑아 보여만 준다. 등록하지 않는다."""
-    names = extract_names(body.get("text") or "")
-    return {"names": names, "count": len(names)}
+    """붙여넣은 덩어리에서 상호명을 뽑아 보여만 준다. 등록하지 않는다.
+
+    카페·주점과 비싼 곳은 걸러 내고, 왜 걸렀는지도 같이 돌려준다.
+    """
+    keep, dropped = extract_entries(
+        body.get("text") or "",
+        drop_cafe=body.get("drop_cafe", True),
+        drop_pricey=body.get("drop_pricey", True),
+    )
+    return {
+        "names": [e["name"] for e in keep],
+        "entries": keep,
+        "dropped": dropped,
+        "count": len(keep),
+        "dropped_count": len(dropped),
+    }
 
 
 @route("POST", "/api/enrich")

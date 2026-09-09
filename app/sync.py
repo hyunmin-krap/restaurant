@@ -213,6 +213,7 @@ def import_named_places(
     office_lng: float,
     area_keyword: str = "",
     mark_others_no_lunch: bool = False,
+    radius_m: int = 0,
     state: SyncState | None = None,
     lock: threading.Lock | None = None,
 ) -> int:
@@ -225,6 +226,7 @@ def import_named_places(
     state = state or SyncState()
     state.total = len(names)
     imported_ids: set[str] = set()
+    distances: list[float] = []
 
     for idx, raw_name in enumerate(names, start=1):
         state.done = idx
@@ -273,9 +275,19 @@ def import_named_places(
             write()
 
         imported_ids.add(matched.id)
+        if matched.distance_m is not None:
+            distances.append(matched.distance_m)
         state.added = len(imported_ids)
         state.message = f"{matched.name} — 등록 ({major}·{detail}, {round(matched.distance_m or 0)}m)"
         state.log.append(state.message)
+
+    if distances:
+        near = sum(1 for d in distances if radius_m and d <= radius_m)
+        state.log.append(
+            f"회사에서 직선거리 기준 가장 가까운 곳 {round(min(distances))}m, "
+            f"가장 먼 곳 {round(max(distances))}m."
+            + (f" {radius_m}m 안은 {near}곳입니다." if radius_m else "")
+        )
 
     if mark_others_no_lunch and imported_ids:
         marks = [

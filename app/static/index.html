@@ -102,13 +102,23 @@
 
     <div class="card block">
       <h3>네이버 지도 목록 붙여넣기</h3>
-      <p class="hint">네이버 지도에서 <b>음식점 → 영업시간 → 요일·시간을 평일 12시</b>로 걸면
-        점심 장사하는 곳만 나옵니다. 그 목록을 <b>드래그해서 그대로 복사·붙여넣기</b> 하세요.
-        분류·별점·주소·영업상태가 섞여 있어도 상호명만 알아서 골라냅니다.
-        좌표·분류는 자동으로 채워지고 전부 '점심 영업'으로 표시됩니다.</p>
+      <p class="hint">네이버 지도에서 <b>음식점</b>으로 검색한 목록을
+        <b>드래그해서 그대로 복사·붙여넣기</b> 하세요. 별점·주소·리뷰·광고가 섞여 있어도
+        상호명과 업종만 알아서 골라냅니다. 좌표와 회사에서의 거리는 등록할 때 자동으로 채워집니다.
+        <b>영업시간 → 평일 12시</b> 필터까지 걸어 두면 점심 장사하는 곳만 걸러집니다.</p>
       <label>네이버 지도에서 복사한 내용
-        <textarea id="import-text" placeholder="1&#10;공덕 돈까스&#10;돈까스&#10;4.52 (120)&#10;서울 마포구 만리재로 15&#10;영업 중 · 21:00에 영업 종료&#10;길찾기  저장  공유&#10;..."></textarea>
+        <textarea id="import-text" placeholder="* [역전회관 마포본점예약톡톡쿠폰한식](https://pcmap.place.naver.com/...)&#10;* [스키당 대흥점예약일식당](https://pcmap.place.naver.com/...)&#10;..."></textarea>
       </label>
+      <div class="row" style="gap:14px;margin:8px 0">
+        <label class="inline">
+          <input type="checkbox" id="import-drop-cafe" checked>
+          카페·빵집·술집 빼기
+        </label>
+        <label class="inline">
+          <input type="checkbox" id="import-drop-pricey" checked>
+          호텔 뷔페처럼 비싼 곳 빼기
+        </label>
+      </div>
       <div id="import-preview" class="preview" hidden></div>
       <label class="inline" style="margin:10px 0">
         <input type="checkbox" id="import-exclusive">

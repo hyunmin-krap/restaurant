@@ -205,3 +205,30 @@ class ImportPreviewTestCase(ServerTestCase):
         status, data = request(f"{self.base}/api/import", "POST", {"text": "길찾기\n저장"})
         self.assertEqual(status, 400)
         self.assertIn("상호명", data["error"])
+
+    def test_preview_reads_naver_map_markdown(self):
+        pc = "https://pcmap.place.naver.com/restaurant/list?query=x#"
+        text = "\n".join([
+            f"* [역전회관 마포본점예약톡톡쿠폰한식]({pc})",
+            f"[영업 중별점4.41리뷰 4,220]({pc})",
+            f"* [투썸플레이스 마포대로점배달카페]({pc})",
+            f"* [마키노차야 마포점네이버페이예약쿠폰해산물뷔페]({pc})",
+            "[광고](https://help.naver.com/support/alias/NSP/NSP_53.naver)",
+        ])
+        status, data = request(f"{self.base}/api/import/preview", "POST", {"text": text})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["names"], ["역전회관 마포본점"])
+        self.assertEqual(data["entries"][0]["category"], "한식")
+        self.assertEqual(data["dropped_count"], 2)
+        reasons = {d["name"]: d["reason"] for d in data["dropped"]}
+        self.assertEqual(reasons["투썸플레이스 마포대로점"], "카페·주점")
+        self.assertEqual(reasons["마키노차야 마포점"], "비싼 편")
+
+    def test_preview_filters_can_be_turned_off(self):
+        pc = "https://pcmap.place.naver.com/restaurant/list?query=x#"
+        text = f"* [투썸플레이스 마포대로점배달카페]({pc})"
+        status, data = request(f"{self.base}/api/import/preview", "POST",
+                               {"text": text, "drop_cafe": False})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["names"], ["투썸플레이스 마포대로점"])
+        self.assertEqual(data["dropped_count"], 0)

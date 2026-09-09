@@ -228,3 +228,59 @@ def is_restaurant(raw_category: str, name: str = "") -> bool:
         # 카테고리가 없는 건(직접 등록한 곳 등)은 일단 후보로 둔다.
         return True
     return "음식점" in cat or classify_major(raw_category) != UNKNOWN
+
+
+# 네이버 지도 목록을 통째로 붙여넣을 때 자동으로 빼는 곳들.
+# 지도에서 '음식점'으로 검색하면 카페·빵집·술집·호텔 뷔페까지 다 섞여 나온다.
+
+# 끼니가 아닌 곳 (업종 표기 또는 상호명에 들어 있으면 뺀다)
+NOT_A_MEAL = (
+    "카페", "커피", "디저트", "베이커리", "케이크", "도넛", "빙수", "아이스크림",
+    "제과", "빵집", "떡카페", "호두과자", "과일주스", "테이크아웃커피", "전통찻집",
+    "요리주점", "이자카야", "맥주,호프", "칵테일바", "와인바", "포장마차", "술집",
+    "호프", "펍(pub)", "포차",
+)
+
+# 위 목록에 걸려도 점심 한 끼가 되는 곳
+MEAL_ANYWAY = ("브런치", "구내식당", "사원식당", "베이커리카페 뷔페")
+
+# 점심값으로는 부담스러운 곳. 호텔 뷔페·한우·오마카세 같은 것들.
+PRICEY = (
+    "호텔", "hotel", "신라스테이", "롯데시티", "뷔페", "부페",
+    "오마카세", "한우", "한정식", "코스요리", "파인다이닝",
+    "소고기구이", "등심", "스테이크하우스", "샤로수길한우",
+)
+
+# 비싸 보이는 낱말이 들어가도 점심은 싼 곳
+PRICEY_EXCEPTIONS = ("한우국밥", "한우곰탕", "한우설렁탕", "한우사골")
+
+
+def is_pricey(raw_category: str, name: str = "") -> bool:
+    """점심 한 끼로는 너무 비싼 곳인지."""
+    haystack = _norm(raw_category) + " " + _norm(name)
+    if any(_norm(x) in haystack for x in PRICEY_EXCEPTIONS):
+        return False
+    return any(_norm(x) in haystack for x in PRICEY)
+
+
+def is_meal(raw_category: str, name: str = "") -> bool:
+    """끼니가 되는 곳인지. 카페·빵집·술집은 아니다."""
+    haystack = _norm(raw_category) + " " + _norm(name)
+    if any(_norm(x) in haystack for x in MEAL_ANYWAY):
+        return True
+    return not any(_norm(x) in haystack for x in NOT_A_MEAL)
+
+
+def paste_exclusion_reason(
+    raw_category: str,
+    name: str = "",
+    *,
+    drop_cafe: bool = True,
+    drop_pricey: bool = True,
+) -> str:
+    """붙여넣기 목록에서 뺄 이유. 뺄 이유가 없으면 빈 문자열."""
+    if drop_cafe and not is_meal(raw_category, name):
+        return "카페·주점"
+    if drop_pricey and is_pricey(raw_category, name):
+        return "비싼 편"
+    return ""
