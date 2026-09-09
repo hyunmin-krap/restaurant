@@ -75,12 +75,21 @@ def novelty_factor(days_since_recommended: float | None) -> float:
     return 1.0
 
 
+# 거리 가중치. 선형이 아니라 완만한 곡선을 쓴다.
+#   가까운 구간끼리는 차이가 작아서 (지수 1.5) 코앞 몇 집으로 쏠리지 않고,
+#   반경 끝으로 갈수록 확실히 떨어져서 먼 곳과 동등해지지도 않는다.
+#   반경 500m 기준 50m 지점은 500m 지점보다 약 1.65배 자주 뽑힌다.
+DISTANCE_NEAR = 1.25   # 바로 앞
+DISTANCE_DROP = 0.50   # 반경 끝까지 떨어지는 폭
+DISTANCE_CURVE = 1.5   # 클수록 가까운 구간이 평평해진다
+
+
 def distance_factor(distance_m: float | None, radius_m: int) -> float:
-    """반경 안에서 가까울수록 약간 유리. 최대 1.25배 차이."""
+    """반경 안에서 가까울수록 유리. 0.75 ~ 1.25배."""
     if distance_m is None or radius_m <= 0:
         return 1.0
     ratio = min(1.0, max(0.0, distance_m / radius_m))
-    return 1.15 - 0.3 * ratio
+    return max(0.7, DISTANCE_NEAR - DISTANCE_DROP * ratio**DISTANCE_CURVE)
 
 
 def score(candidate: dict[str, Any], radius_m: int, now: datetime) -> tuple[float, dict[str, float]]:

@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS places (
     review_total      INTEGER,
     taste_source      TEXT,          -- naver_place | manual
     taste_updated_at  TEXT,
+    lunch_open        INTEGER,       -- 1=점심 영업, 0=점심 영업 안 함, NULL=모름
+    lunch_source      TEXT,          -- naver_place | manual
+    business_hours    TEXT,          -- 영업시간 원문 (있으면 화면에 표시)
     source            TEXT,
     is_active         INTEGER NOT NULL DEFAULT 1,
     created_at        TEXT NOT NULL,
@@ -85,9 +88,50 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+# 나중에 추가된 컬럼들. 기존 DB 를 그대로 쓰면서 채워 넣는다.
+MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("places", "lunch_open INTEGER"),
+    ("places", "lunch_source TEXT"),
+    ("places", "business_hours TEXT"),
+)
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    migrate(conn)
     conn.commit()
+
+
+def migrate(conn: sqlite3.Connection) -> list[str]:
+    """예전 버전 DB 에 빠진 컬럼을 채운다. 데이터는 건드리지 않는다."""
+    applied = []
+    for table, column_def in MIGRATIONS:
+        column = column_def.split()[0]
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+            applied.append(f"{table}.{column}")
+    if applied:
+        conn.commit()
+    return applied
+
+
+def set_lunch_open(
+    conn: sqlite3.Connection,
+    place_id: str,
+    lunch_open: bool | None,
+    source: str = "manual",
+    business_hours: str | None = None,
+) -> None:
+    """점심 영업 여부를 기록한다. None 이면 '모름'으로 되돌린다."""
+    value = None if lunch_open is None else int(bool(lunch_open))
+    conn.execute(
+        """UPDATE places
+              SET lunch_open = ?, lunch_source = ?,
+                  business_hours = COALESCE(?, business_hours), updated_at = ?
+            WHERE id = ?""",
+        (value, source if value is not None else None, business_hours, now_iso(), place_id),
+    )
 
 
 def upsert_place(conn: sqlite3.Connection, place: dict[str, Any]) -> None:

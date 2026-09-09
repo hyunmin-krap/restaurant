@@ -69,9 +69,9 @@ def load_config() -> Config:
     if not db_path.is_absolute():
         db_path = ROOT / db_path
     return Config(
-        office_name=os.environ.get("OFFICE_NAME", "우리 회사"),
-        office_lat=_float("OFFICE_LAT", 37.4979),
-        office_lng=_float("OFFICE_LNG", 127.0276),
+        office_name=os.environ.get("OFFICE_NAME", "신원빌딩 (공덕역 4번출구)"),
+        office_lat=_float("OFFICE_LAT", 37.54306),
+        office_lng=_float("OFFICE_LNG", 126.95111),
         radius_m=_int("SEARCH_RADIUS_M", 500),
         recommend_count=_int("RECOMMEND_COUNT", 3),
         naver_client_id=os.environ.get("NAVER_CLIENT_ID", "").strip(),

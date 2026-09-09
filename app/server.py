@@ -113,7 +113,8 @@ def get_recommend(h: "LunchHandler", q, body):
     record = _int_param(q, "record", 1) == 1
     with s.lock:
         return service.make_recommendation(
-            s.conn, radius_m=radius, count=count, record=record, rng=random.Random()
+            s.conn, radius_m=radius, count=count, record=record, rng=random.Random(),
+            office=s.office, office_name=s.setting_str("office_name", s.config.office_name),
         )
 
 
@@ -121,7 +122,11 @@ def get_recommend(h: "LunchHandler", q, body):
 def get_places(h: "LunchHandler", q, body):
     radius = q.get("radius", [None])[0]
     radius_m = int(radius) if radius not in (None, "", "all") else None
-    return {"items": service.list_places(h.state.conn, radius_m)}
+    s = h.state
+    return {"items": service.list_places(
+        s.conn, radius_m, office=s.office,
+        office_name=s.setting_str("office_name", s.config.office_name),
+    )}
 
 
 @route("POST", "/api/places")
@@ -165,6 +170,18 @@ def post_taste(h: "LunchHandler", q, body):
     )
     h.state.conn.commit()
     return {"ok": True, "ratio": round(ratio, 4)}
+
+
+@route("POST", "/api/lunch")
+def post_lunch(h: "LunchHandler", q, body):
+    """점심 영업 여부 표시. open=false 면 추천 후보에서 빠진다."""
+    raw = body.get("open")
+    lunch_open = None if raw in (None, "", "unknown") else bool(raw)
+    try:
+        service.set_lunch_open(h.state.conn, body.get("place_id", ""), lunch_open)
+    except KeyError as exc:
+        raise ApiError(404, "없는 식당입니다.") from exc
+    return {"ok": True, "lunch_open": lunch_open}
 
 
 @route("POST", "/api/ratings")

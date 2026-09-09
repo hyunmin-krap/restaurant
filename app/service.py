@@ -7,8 +7,13 @@ from typing import Any
 
 from . import db as dbm
 from .categories import classify
+from urllib.parse import quote
+
 from .geo import haversine_m, walking_minutes
 from .recommender import Pick, batch_id, explain, recommend, today_kst
+
+# 네이버 지도 앱 스킴이 요구하는 호출자 식별자.
+APP_NAME = "lunch.picker"
 
 CANDIDATE_SQL = """
 SELECT p.*,
@@ -18,22 +23,49 @@ SELECT p.*,
   FROM places p
  WHERE p.is_active = 1
    AND p.id NOT IN (SELECT place_id FROM blocks)
+   AND (p.lunch_open IS NULL OR p.lunch_open = 1)
    AND (p.distance_m IS NULL OR p.distance_m <= :radius)
 """
 
 
+def _search_query(place: dict[str, Any]) -> str:
+    return " ".join(
+        filter(None, [place.get("name"), place.get("road_address") or place.get("address")])
+    )
+
+
 def naver_map_url(place: dict[str, Any]) -> str:
-    """네이버 지도 검색 링크. 플레이스 ID 를 알면 상세 페이지로 바로 보낸다."""
+    """네이버 지도 웹 링크. 플레이스 ID 를 알면 상세 페이지로 바로 보낸다."""
     pid = place.get("naver_place_id")
     if pid:
         return f"https://map.naver.com/p/entry/place/{pid}"
-    query = " ".join(filter(None, [place.get("name"), place.get("road_address") or place.get("address")]))
-    from urllib.parse import quote
-
-    return f"https://map.naver.com/p/search/{quote(query)}"
+    return f"https://map.naver.com/p/search/{quote(_search_query(place))}"
 
 
-def serialize_place(place: dict[str, Any]) -> dict[str, Any]:
+def naver_app_url(place: dict[str, Any]) -> str:
+    """모바일 네이버 지도 앱 스킴. 앱이 없으면 열리지 않으므로 웹 링크로 폴백한다."""
+    pid = place.get("naver_place_id")
+    if pid:
+        return f"nmap://place?id={pid}&appname={APP_NAME}"
+    return f"nmap://search?query={quote(_search_query(place))}&appname={APP_NAME}"
+
+
+def naver_directions_url(place: dict[str, Any], office: tuple[float, float] | None,
+                         office_name: str = "회사") -> str | None:
+    """회사 -> 식당 도보 길찾기 링크. 좌표가 없으면 None."""
+    lat, lng = place.get("lat"), place.get("lng")
+    if office is None or lat is None or lng is None:
+        return None
+    start = f"{office[1]},{office[0]},{quote(office_name)}"
+    goal = f"{lng},{lat},{quote(place.get('name') or '식당')}"
+    return f"https://map.naver.com/p/directions/{start}/{goal}/-/walk"
+
+
+def serialize_place(
+    place: dict[str, Any],
+    office: tuple[float, float] | None = None,
+    office_name: str = "회사",
+) -> dict[str, Any]:
     distance = place.get("distance_m")
     taste = place.get("taste_ratio")
     team_avg = place.get("team_avg")
@@ -54,7 +86,12 @@ def serialize_place(place: dict[str, Any]) -> dict[str, Any]:
         "team_avg": round(team_avg, 2) if team_avg is not None else None,
         "team_count": place.get("team_count") or 0,
         "last_recommended_at": place.get("last_recommended_at"),
+        "lunch_open": place.get("lunch_open"),
+        "lunch_source": place.get("lunch_source"),
+        "business_hours": place.get("business_hours") or "",
         "map_url": naver_map_url(place),
+        "app_url": naver_app_url(place),
+        "directions_url": naver_directions_url(place, office, office_name),
     }
 
 
@@ -69,6 +106,8 @@ def make_recommendation(
     count: int,
     record: bool = True,
     rng: random.Random | None = None,
+    office: tuple[float, float] | None = None,
+    office_name: str = "회사",
 ) -> dict[str, Any]:
     rng = rng or random.Random()
     candidates = load_candidates(conn, radius_m)
@@ -86,7 +125,7 @@ def make_recommendation(
 
     items = []
     for pick in picks:
-        item = serialize_place(pick.place)
+        item = serialize_place(pick.place, office, office_name)
         item["why"] = explain(pick)
         item["weight"] = round(pick.weight, 4)
         items.append(item)
@@ -175,6 +214,14 @@ def unblock_place(conn: sqlite3.Connection, place_id: str) -> None:
     conn.commit()
 
 
+def set_lunch_open(conn: sqlite3.Connection, place_id: str, lunch_open: bool | None) -> None:
+    """'점심 영업 안 함'으로 표시하거나 되돌린다. 표시된 곳은 추천에서 빠진다."""
+    if not conn.execute("SELECT 1 FROM places WHERE id = ?", (place_id,)).fetchone():
+        raise KeyError(place_id)
+    dbm.set_lunch_open(conn, place_id, lunch_open, source="manual")
+    conn.commit()
+
+
 def list_blocks(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """SELECT b.place_id, b.reason, b.blocked_by, b.created_at,
@@ -186,7 +233,12 @@ def list_blocks(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 # ── 조회 ────────────────────────────────────────────────────────────
-def list_places(conn: sqlite3.Connection, radius_m: int | None = None) -> list[dict[str, Any]]:
+def list_places(
+    conn: sqlite3.Connection,
+    radius_m: int | None = None,
+    office: tuple[float, float] | None = None,
+    office_name: str = "회사",
+) -> list[dict[str, Any]]:
     sql = """
     SELECT p.*,
            (SELECT AVG(stars) FROM ratings r WHERE r.place_id = p.id) AS team_avg,
@@ -203,7 +255,7 @@ def list_places(conn: sqlite3.Connection, radius_m: int | None = None) -> list[d
     sql += " ORDER BY p.distance_m IS NULL, p.distance_m"
     out = []
     for row in conn.execute(sql, params).fetchall():
-        item = serialize_place(dict(row))
+        item = serialize_place(dict(row), office, office_name)
         item["blocked"] = bool(row["blocked"])
         out.append(item)
     return out
@@ -248,6 +300,9 @@ def stats(conn: sqlite3.Connection, radius_m: int) -> dict[str, Any]:
     with_taste = conn.execute(
         "SELECT COUNT(*) c FROM places WHERE taste_ratio IS NOT NULL"
     ).fetchone()["c"]
+    no_lunch = conn.execute(
+        "SELECT COUNT(*) c FROM places WHERE lunch_open = 0"
+    ).fetchone()["c"]
     by_major = dbm.rows_to_dicts(
         conn.execute(
             """SELECT COALESCE(major_category,'기타') AS major, COUNT(*) AS cnt
@@ -261,6 +316,7 @@ def stats(conn: sqlite3.Connection, radius_m: int) -> dict[str, Any]:
         "places_total": total,
         "places_in_radius": in_radius,
         "blocked": blocked,
+        "no_lunch": no_lunch,
         "rated_places": rated,
         "places_with_taste": with_taste,
         "by_major": by_major,

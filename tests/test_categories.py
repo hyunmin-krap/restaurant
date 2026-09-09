@@ -45,3 +45,34 @@ class TestCategories(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLunchFilter(unittest.TestCase):
+    def test_cafes_and_bars_are_not_lunch_candidates(self):
+        from app.categories import is_lunch_friendly
+        for cat, name in [
+            ("음식점>카페,디저트>커피전문점", "스타벅스"),
+            ("음식점>술집>이자카야", "오뎅바"),
+            ("음식점>술집>요리주점", "포차"),
+            ("음식점>양식>와인바", "와인창고"),
+            ("음식점>카페,디저트>베이커리", "빵집"),
+        ]:
+            with self.subTest(name=name):
+                self.assertFalse(is_lunch_friendly(cat, name))
+                self.assertFalse(is_restaurant(cat, name))
+
+    def test_real_lunch_spots_pass(self):
+        for cat, name in [
+            ("음식점>한식>육류,고기", "육전식당"),
+            ("음식점>일식>돈까스", "명동돈까스"),
+            ("음식점>한식>백반,가정식", "기사식당"),
+            ("음식점>분식", "떡볶이집"),
+            ("음식점>중식", "홍콩반점"),
+        ]:
+            with self.subTest(name=name):
+                self.assertTrue(is_restaurant(cat, name))
+
+    def test_name_alone_can_disqualify(self):
+        from app.categories import is_lunch_friendly
+        self.assertFalse(is_lunch_friendly("", "동네카페"))
+        self.assertTrue(is_lunch_friendly("", "김밥천국"))

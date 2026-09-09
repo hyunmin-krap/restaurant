@@ -92,9 +92,20 @@ label.inline select, label.inline input { width: auto; margin-top: 0; }
 .meter { flex: 1; height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--good); border-radius: 999px; }
 .value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sub-metric { margin: -1px 0 4px 82px; font-size: .74rem; color: var(--muted); }
+.sub-metric .thin { color: var(--accent); }
 .why { margin: 10px 0 0; font-size: .8rem; color: var(--muted); }
 .card .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }
+.card .row + .row { margin-top: 6px; }
+.row.compact { gap: 5px; }
+.row.compact button { padding: 5px 9px; font-size: .78rem; }
+a.btn {
+  display: inline-block; font: inherit; font-size: .85rem; padding: 6px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  color: var(--text); text-decoration: none;
+}
+a.btn:hover { border-color: var(--muted); }
 .row button { padding: 6px 12px; font-size: .85rem; }
 
 .empty { color: var(--muted); text-align: center; padding: 40px 0; }

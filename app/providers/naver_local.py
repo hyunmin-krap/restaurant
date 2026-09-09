@@ -63,7 +63,7 @@ class NaverLocalProvider:
         if not name:
             return None
         category = item.get("category", "") or ""
-        if not is_restaurant(category):
+        if not is_restaurant(category, name):
             return None
         coords = parse_naver_coords(item.get("mapx"), item.get("mapy"))
         if coords is None:

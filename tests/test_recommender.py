@@ -122,3 +122,43 @@ class TestExplain(unittest.TestCase):
     def test_explain_falls_back(self):
         from app.recommender import Pick, explain
         self.assertEqual(explain(Pick(place("d", "한식", "국밥", distance_m=400), 1.0, {})), "오늘의 랜덤")
+
+
+class TestDistanceWeighting(unittest.TestCase):
+    """거리는 가까울수록 유리하되, 코앞 몇 집으로 쏠리지 않아야 한다."""
+
+    def test_monotonically_decreasing(self):
+        values = [distance_factor(d, 500) for d in range(0, 501, 50)]
+        self.assertEqual(values, sorted(values, reverse=True))
+
+    def test_near_far_gap_stays_moderate(self):
+        ratio = distance_factor(0, 500) / distance_factor(500, 500)
+        # 맛있어요(최대 4배)·별점(최대 4.9배)보다 확실히 작아야 거리가 지배하지 않는다
+        self.assertGreater(ratio, 1.4)
+        self.assertLess(ratio, 1.8)
+
+    def test_curve_is_flat_near_the_office(self):
+        # 가까운 구간(50m 차이)의 낙폭이 먼 구간보다 작아야 코앞 쏠림이 없다
+        near_drop = distance_factor(0, 500) - distance_factor(100, 500)
+        far_drop = distance_factor(400, 500) - distance_factor(500, 500)
+        self.assertLess(near_drop, far_drop / 2)
+
+    def test_never_drops_below_floor(self):
+        for d in (500, 1000, 99999):
+            self.assertGreaterEqual(distance_factor(d, 500), 0.7)
+
+    def test_missing_distance_is_neutral(self):
+        self.assertEqual(distance_factor(None, 500), 1.0)
+        self.assertEqual(distance_factor(300, 0), 1.0)
+
+    def test_closer_place_wins_more_often_but_not_overwhelmingly(self):
+        near = place("near", "한식", "국밥", distance_m=60)
+        far = place("far", "중식", "짬뽕", distance_m=480)
+        wins = sum(
+            1 for seed in range(600)
+            if recommend([near, far], count=1, radius_m=500,
+                         rng=random.Random(seed))[0].place["id"] == "near"
+        )
+        # 60% 안팎이면 '조금 더 자주'. 80% 를 넘으면 쏠린 것.
+        self.assertGreater(wins, 330)
+        self.assertLess(wins, 480)

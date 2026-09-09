@@ -117,3 +117,63 @@ class ServiceTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LunchFilterTestCase(ServiceTestCase):
+    def test_no_lunch_places_are_excluded(self):
+        service.set_lunch_open(self.conn, "t:마짬뽕", False)
+        names = {c["name"] for c in service.load_candidates(self.conn, 500)}
+        self.assertNotIn("마짬뽕", names)
+
+        # 되돌리면 다시 후보로 돌아온다
+        service.set_lunch_open(self.conn, "t:마짬뽕", True)
+        self.assertIn("마짬뽕", {c["name"] for c in service.load_candidates(self.conn, 500)})
+
+    def test_unknown_lunch_hours_are_kept(self):
+        row = self.conn.execute("SELECT lunch_open FROM places WHERE id='t:마짬뽕'").fetchone()
+        self.assertIsNone(row["lunch_open"])
+        self.assertIn("마짬뽕", {c["name"] for c in service.load_candidates(self.conn, 500)})
+
+    def test_set_lunch_open_validates_place(self):
+        with self.assertRaises(KeyError):
+            service.set_lunch_open(self.conn, "t:없는집", False)
+
+    def test_stats_counts_no_lunch(self):
+        service.set_lunch_open(self.conn, "t:마짬뽕", False)
+        self.assertEqual(service.stats(self.conn, 500)["no_lunch"], 1)
+
+
+class MapUrlTestCase(ServiceTestCase):
+    def test_place_id_goes_straight_to_detail_page(self):
+        url = service.naver_map_url({"name": "가게", "naver_place_id": "1234567890"})
+        self.assertEqual(url, "https://map.naver.com/p/entry/place/1234567890")
+
+    def test_search_url_is_encoded(self):
+        url = service.naver_map_url({"name": "한터 돼지국밥", "road_address": "서울 강남구"})
+        self.assertTrue(url.startswith("https://map.naver.com/p/search/"))
+        self.assertNotIn(" ", url)
+
+    def test_app_scheme_for_mobile(self):
+        self.assertTrue(
+            service.naver_app_url({"name": "가게", "naver_place_id": "77"}).startswith("nmap://place?id=77")
+        )
+        self.assertTrue(service.naver_app_url({"name": "가게"}).startswith("nmap://search?"))
+
+    def test_directions_url_uses_lng_lat_order(self):
+        url = service.naver_directions_url(
+            {"name": "국밥집", "lat": 37.4985, "lng": 127.028}, (37.4979, 127.0276), "우리 회사"
+        )
+        self.assertIn("/directions/127.0276,37.4979,", url)
+        self.assertIn("/127.028,37.4985,", url)
+        self.assertTrue(url.endswith("/-/walk"))
+
+    def test_directions_url_needs_coordinates(self):
+        self.assertIsNone(service.naver_directions_url({"name": "가게"}, (37.5, 127.0)))
+        self.assertIsNone(service.naver_directions_url({"name": "가게", "lat": 37.5, "lng": 127.0}, None))
+
+    def test_serialize_exposes_all_links(self):
+        row = dict(self.conn.execute("SELECT * FROM places WHERE id='t:다국밥'").fetchone())
+        item = service.serialize_place(row, (37.4979, 127.0276), "우리 회사")
+        self.assertTrue(item["map_url"].startswith("https://map.naver.com"))
+        self.assertTrue(item["app_url"].startswith("nmap://"))
+        self.assertTrue(item["directions_url"].startswith("https://map.naver.com/p/directions/"))

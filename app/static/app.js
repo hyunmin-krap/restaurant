@@ -32,6 +32,24 @@ const el = (tag, attrs = {}, ...children) => {
   return node;
 };
 
+const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+// 모바일에서는 네이버 지도 앱을 먼저 시도하고, 안 열리면 웹으로 넘어간다.
+function openNaver(item) {
+  if (!isMobile() || !item.app_url) {
+    window.open(item.map_url, '_blank', 'noopener');
+    return;
+  }
+  const startedAt = Date.now();
+  const fallback = setTimeout(() => {
+    if (Date.now() - startedAt < 2000 && !document.hidden) {
+      window.open(item.map_url, '_blank', 'noopener');
+    }
+  }, 900);
+  document.addEventListener('visibilitychange', () => clearTimeout(fallback), { once: true });
+  window.location.href = item.app_url;
+}
+
 const pct = (r) => (r === null || r === undefined ? null : Math.round(r * 100));
 const starText = (avg) => '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
 
@@ -46,10 +64,15 @@ function cardFor(item) {
       item.distance_m === null ? '알 수 없음' : `${item.distance_m}m · 도보 ${item.walk_min}분`)));
 
   if (taste !== null) {
+    const n = item.taste_total;
     metrics.push(el('div', { class: 'metric' },
       el('span', { class: 'label' }, '맛있어요'),
       el('span', { class: 'meter' }, el('span', { style: `width:${taste}%` })),
       el('span', { class: 'value' }, `${taste}%`)));
+    // 비율만 보면 표본 3명짜리 100% 와 300명짜리 79% 가 같아 보인다. 모수를 같이 적는다.
+    metrics.push(el('p', { class: 'sub-metric' },
+      n ? `네이버 방문자 리뷰 ${n.toLocaleString('ko-KR')}명 기준` : '리뷰 수 미상',
+      n && n < 20 ? el('span', { class: 'thin' }, ' · 표본 적음') : null));
   } else {
     metrics.push(el('div', { class: 'metric' },
       el('span', { class: 'label' }, '맛있어요'),
@@ -71,10 +94,17 @@ function cardFor(item) {
         ? el('span', { class: 'badge plain' }, item.detail_category) : null),
     el('p', { class: 'muted', style: 'margin:0 0 8px' }, item.address || ''),
     ...metrics,
+    item.business_hours ? el('p', { class: 'muted', style: 'margin:6px 0 0' }, item.business_hours) : null,
     el('p', { class: 'why' }, item.why || ''),
     el('div', { class: 'row' },
-      el('button', { onclick: () => openRating(item) }, '⭐ 별점 남기기'),
-      el('button', { onclick: () => blockPlace(item) }, '🚫 다시 안 보기')));
+      el('button', { class: 'primary', onclick: () => openNaver(item) }, '📍 네이버 지도'),
+      item.directions_url
+        ? el('a', { class: 'btn', href: item.directions_url, target: '_blank', rel: 'noopener' }, '🚶 길찾기')
+        : null),
+    el('div', { class: 'row compact' },
+      el('button', { onclick: () => openRating(item) }, '⭐ 별점'),
+      el('button', { title: '점심 장사를 안 하는 곳으로 표시', onclick: () => markNoLunch(item) }, '🕛 점심 안 함'),
+      el('button', { title: '추천 후보에서 제외', onclick: () => blockPlace(item) }, '🚫 다시 안 보기')));
 }
 
 async function draw() {
@@ -102,13 +132,21 @@ async function draw() {
 }
 
 async function blockPlace(item) {
-  const reason = prompt(`'${item.name}'을(를) 추천에서 뺍니다.\n이유(선택):`, '');
+  const reason = prompt(
+    `'${item.name}'을(를) 추천에서 뺍니다.\n이유(선택) — 예: 폐업, 웨이팅 너무 김, 입맛에 안 맞음`, '');
   if (reason === null) return;
   await api('/api/blocks', {
     method: 'POST',
     body: { place_id: item.id, reason, by: localStorage.getItem('rater') || '' },
   });
   await Promise.all([draw(), loadBlocks(), loadStats()]);
+}
+
+// 점심 장사를 안 하는 곳(저녁만 하는 집 등). 한 번 표시하면 팀 전체에 적용된다.
+async function markNoLunch(item) {
+  if (!confirm(`'${item.name}'은(는) 점심에 영업하지 않나요?\n표시하면 앞으로 추천에서 빠집니다.`)) return;
+  await api('/api/lunch', { method: 'POST', body: { place_id: item.id, open: false } });
+  await Promise.all([draw(), loadPlaces(), loadStats()]);
 }
 
 // ── 별점 ───────────────────────────────────────────────────────────
@@ -179,7 +217,7 @@ async function loadHistory() {
 
 function placeRow(p) {
   const taste = pct(p.taste_ratio);
-  return el('div', { class: `place-row${p.blocked ? ' blocked' : ''}` },
+  return el('div', { class: `place-row${p.blocked || p.lunch_open === 0 ? ' blocked' : ''}` },
     el('span', { class: 'grow' },
       el('div', {}, el('a', { href: p.map_url, target: '_blank', rel: 'noopener', style: 'color:inherit' }, p.name),
         ' ', el('span', { class: 'muted' }, `${p.major_category}${p.detail_category && p.detail_category !== p.major_category ? ' · ' + p.detail_category : ''}`)),
@@ -188,6 +226,17 @@ function placeRow(p) {
       [p.distance_m !== null ? `${p.distance_m}m` : '',
        taste !== null ? `맛${taste}%` : '',
        p.team_count ? `★${p.team_avg}` : ''].filter(Boolean).join(' · ')),
+    el('button', {
+      style: 'padding:4px 9px;font-size:.78rem',
+      title: p.lunch_open === 0 ? '점심 영업 안 함으로 표시됨' : '점심 영업 여부',
+      onclick: async () => {
+        await api('/api/lunch', {
+          method: 'POST',
+          body: { place_id: p.id, open: p.lunch_open === 0 ? true : false },
+        });
+        await Promise.all([loadPlaces(), loadStats()]);
+      },
+    }, p.lunch_open === 0 ? '🕛 점심X' : '🕛'),
     el('button', {
       style: 'padding:4px 9px;font-size:.78rem',
       onclick: async () => {
@@ -248,7 +297,7 @@ async function loadStats() {
   const cells = [
     ['반경 내 식당', s.places_in_radius], ['전체 등록', s.places_total],
     ['맛있어요 지표', s.places_with_taste], ['별점 있는 곳', s.rated_places],
-    ['제외', s.blocked],
+    ['제외', s.blocked], ['점심 안 함', s.no_lunch],
   ];
   cells.forEach(([label, value]) => box.append(
     el('div', { class: 'stat' }, el('b', {}, String(value)), el('span', {}, label))));

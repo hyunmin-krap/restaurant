@@ -135,14 +135,34 @@ def dedupe_key(major: str, detail: str) -> str:
     return (detail or major or UNKNOWN).strip()
 
 
-def is_restaurant(raw_category: str) -> bool:
-    """음식점으로 볼 수 있는 카테고리인지. 카페·술집은 점심 후보에서 뺀다."""
+# 점심을 먹기 어려운 업종. 저녁·야간 전용이거나 끼니가 아닌 곳들.
+LUNCH_UNFRIENDLY = (
+    # 카페·디저트
+    "카페", "커피", "디저트", "베이커리", "제과", "빵집", "아이스크림", "빙수",
+    "도넛", "와플", "케이크", "차(tea)", "티하우스", "juice", "주스",
+    # 술집·야간
+    "술집", "호프", "포차", "포장마차", "이자카야", "요리주점", "바(bar)",
+    "와인", "칵테일", "맥주", "소주방", "룸살롱", "유흥", "감성주점", "다찌",
+    "펍", "위스키", "막걸리", "전통주",
+    # 애초에 식당이 아닌 것
+    "편의점", "마트", "약국", "노래", "당구", "PC방", "숙박", "학원", "미용",
+    # 앉아서 먹기 어려운 곳
+    "배달전문", "배달만", "포장전문", "테이크아웃전문",
+)
+
+
+def is_lunch_friendly(raw_category: str, name: str = "") -> bool:
+    """점심 후보로 둘 만한 업종인지. 카페·술집·배달전문은 뺀다."""
+    haystack = _norm(raw_category) + " " + _norm(name)
+    return not any(_norm(x) in haystack for x in LUNCH_UNFRIENDLY)
+
+
+def is_restaurant(raw_category: str, name: str = "") -> bool:
+    """점심 후보로 수집할 곳인지. 카테고리가 없으면 상호명으로만 판단한다."""
+    if not is_lunch_friendly(raw_category, name):
+        return False
     cat = _norm(raw_category)
     if not cat:
         # 카테고리가 없는 건(직접 등록한 곳 등)은 일단 후보로 둔다.
         return True
-    excluded = ("카페", "디저트", "베이커리", "제과", "술집", "호프", "포차",
-                "바(bar)", "편의점", "마트", "약국", "노래", "당구")
-    if any(_norm(x) in cat for x in excluded):
-        return False
     return "음식점" in cat or classify_major(raw_category) != UNKNOWN
