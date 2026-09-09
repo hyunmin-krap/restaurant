@@ -293,22 +293,25 @@ def post_import(h: "LunchHandler", q, body):
         drop_cafe=body.get("drop_cafe", True),
         drop_pricey=body.get("drop_pricey", True),
     )
-    names = [e["name"] for e in keep]
-    if not names:
+    if not keep:
         raise ApiError(400, "상호명을 찾지 못했습니다. 네이버 지도 목록을 그대로 붙여넣어 보세요.")
+
+    # 키가 있으면 좌표·거리까지 채우고, 없으면 상호명·업종만으로 등록한다.
+    # (네이버 검색 API 신규 발급이 개발자센터에서 막혀 키가 없는 경우가 많다)
     try:
         provider = NaverLocalProvider(s.config.naver_client_id, s.config.naver_client_secret)
-    except ProviderError as exc:
-        raise ApiError(400, str(exc)) from exc
+    except ProviderError:
+        provider = None
+
     lat, lng = s.office
     s.sync_state = SyncState()
     run_in_thread(
-        partial(import_named_places, s.conn, provider, names, lat, lng,
+        partial(import_named_places, s.conn, provider, keep, lat, lng,
                 s.area_keyword, bool(body.get("mark_others_no_lunch")), s.radius_m,
                 state=s.sync_state, lock=s.lock),
         s.sync_state,
     )
-    return {"started": True, "count": len(names)}
+    return {"started": True, "count": len(keep), "with_coords": provider is not None}
 
 
 @route("POST", "/api/import/preview")

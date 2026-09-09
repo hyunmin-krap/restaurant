@@ -153,3 +153,68 @@ class FilterTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeylessImportTestCase(unittest.TestCase):
+    """네이버 검색 API 키 없이, 붙여넣기만으로 등록하는 경로."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        from app import db as dbm
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = dbm.connect(Path(self.tmp.name) / "t.db")
+        dbm.init_db(self.conn)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(self.conn.close)
+
+    def test_좌표_없이_상호명과_업종으로_등록한다(self):
+        from app.sync import SyncState, import_named_places
+        entries = [
+            {"name": "역전회관 마포본점", "category": "한식"},
+            {"name": "을밀대 평양냉면", "category": "냉면"},
+        ]
+        state = SyncState()
+        import_named_places(self.conn, None, entries, 37.54306, 126.95111, state=state)
+        rows = {r["name"]: r for r in self.conn.execute("SELECT * FROM places").fetchall()}
+        self.assertEqual(set(rows), {"역전회관 마포본점", "을밀대 평양냉면"})
+        self.assertIsNone(rows["을밀대 평양냉면"]["distance_m"])
+        self.assertEqual(rows["을밀대 평양냉면"]["detail_category"], "냉면")
+        self.assertEqual(rows["역전회관 마포본점"]["source"], "naver_paste")
+
+    def test_거리를_모르는_곳도_추천_후보에_들어간다(self):
+        from app import service
+        from app.sync import import_named_places
+        import_named_places(
+            self.conn, None, [{"name": "역전회관 마포본점", "category": "한식"}],
+            37.54306, 126.95111,
+        )
+        names = [c["name"] for c in service.load_candidates(self.conn, 500)]
+        self.assertIn("역전회관 마포본점", names)
+
+    def test_두_번_등록해도_한_곳만_남는다(self):
+        from app.sync import import_named_places
+        entries = [{"name": "역전회관 마포본점", "category": "한식"}]
+        import_named_places(self.conn, None, entries, 37.54306, 126.95111)
+        import_named_places(self.conn, None, entries, 37.54306, 126.95111)
+        count = self.conn.execute("SELECT COUNT(*) FROM places").fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_점심_영업으로_표시된다(self):
+        from app.sync import import_named_places
+        import_named_places(
+            self.conn, None, [{"name": "역전회관 마포본점", "category": "한식"}],
+            37.54306, 126.95111,
+        )
+        row = self.conn.execute("SELECT lunch_open FROM places").fetchone()
+        self.assertEqual(row["lunch_open"], 1)
+
+    def test_업종을_모르면_상호명으로_분류한다(self):
+        from app.sync import import_named_places
+        import_named_places(
+            self.conn, None, [{"name": "마포양지설렁탕", "category": ""}],
+            37.54306, 126.95111,
+        )
+        row = self.conn.execute("SELECT detail_category FROM places").fetchone()
+        self.assertEqual(row["detail_category"], "설렁탕")

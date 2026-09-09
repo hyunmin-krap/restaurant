@@ -205,10 +205,46 @@ def enrich_places(
 enrich_taste = enrich_places
 
 
+def _paste_id(name: str) -> str:
+    return "paste:" + name.replace(" ", "")
+
+
+def _import_without_coords(
+    conn: sqlite3.Connection, name: str, category: str,
+    lock: threading.Lock | None = None,
+) -> str:
+    """좌표 없이 상호명·업종만으로 등록한다.
+
+    추천 쿼리가 distance_m IS NULL 을 후보로 받아 주기 때문에,
+    거리를 몰라도 추천은 그대로 돌아간다. 반경 필터만 적용되지 않을 뿐이다.
+    """
+    major, detail = classify(category, name)
+    pid = _paste_id(name)
+    row = {
+        "id": pid, "name": name, "road_address": "", "address": "",
+        "lat": None, "lng": None, "raw_category": category,
+        "major_category": major, "detail_category": detail,
+        "phone": "", "link": "", "naver_place_id": None,
+        "distance_m": None, "source": "naver_paste",
+    }
+
+    def write() -> None:
+        dbm.upsert_place(conn, row)
+        dbm.set_lunch_open(conn, pid, True, "manual")
+        conn.commit()
+
+    if lock:
+        with lock:
+            write()
+    else:
+        write()
+    return pid
+
+
 def import_named_places(
     conn: sqlite3.Connection,
-    provider: NaverLocalProvider,
-    names: list[str],
+    provider: NaverLocalProvider | None,
+    entries: list[dict[str, str]],
     office_lat: float,
     office_lng: float,
     area_keyword: str = "",
@@ -224,15 +260,33 @@ def import_named_places(
     (= 붙여넣은 목록이 점심 영업하는 곳 전부라고 선언하는 것)
     """
     state = state or SyncState()
-    state.total = len(names)
+    state.total = len(entries)
     imported_ids: set[str] = set()
     distances: list[float] = []
 
-    for idx, raw_name in enumerate(names, start=1):
+    if provider is None:
+        state.log.append(
+            "네이버 검색 API 키가 없어 좌표 없이 등록합니다. "
+            "지도 화면에 보이던 범위가 곧 거리 기준이 됩니다."
+        )
+
+    for idx, entry in enumerate(entries, start=1):
         state.done = idx
-        name = raw_name.strip()
+        name = (entry.get("name") or "").strip()
         if not name:
             continue
+        category = (entry.get("category") or "").strip()
+
+        # 키가 없으면 좌표 조회를 건너뛰고 붙여넣기에서 얻은 업종으로만 등록한다.
+        if provider is None:
+            pid = _import_without_coords(conn, name, category, lock)
+            imported_ids.add(pid)
+            state.added = len(imported_ids)
+            major, detail = classify(category, name)
+            state.message = f"{name} — 등록 ({major}·{detail}, 거리 미상)"
+            state.log.append(state.message)
+            continue
+
         query = f"{area_keyword} {name}".strip()
         try:
             items = provider.search(query, display=5)
@@ -252,7 +306,7 @@ def import_named_places(
             state.log.append(state.message)
             continue
 
-        major, detail = classify(matched.raw_category, matched.name)
+        major, detail = classify(matched.raw_category or category, matched.name)
         row = {
             "id": matched.id, "name": matched.name,
             "road_address": matched.road_address, "address": matched.address,
@@ -266,6 +320,10 @@ def import_named_places(
         def write() -> None:
             dbm.upsert_place(conn, row)
             dbm.set_lunch_open(conn, row["id"], True, "manual")
+            # 예전에 키 없이 등록해 둔 같은 곳이 있으면 지운다 (추천에 두 번 뜨지 않게)
+            stale = _paste_id(name)
+            if stale != row["id"]:
+                conn.execute("DELETE FROM places WHERE id = ?", (stale,))
             conn.commit()
 
         if lock:

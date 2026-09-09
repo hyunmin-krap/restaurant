@@ -377,7 +377,7 @@ async function loadConfig() {
   warn.textContent = notes.join('\n');
   warn.hidden = !notes.length;
   $('#run-sync').disabled = !cfg.has_naver_keys;
-  $('#run-import').disabled = !cfg.has_naver_keys;
+  // 붙여넣기 등록은 키가 없어도 된다 (좌표 없이 상호명·업종만 등록). 미리보기가 켜 준다.
   $('#run-enrich').disabled = !cfg.review_scrape_enabled && !cfg.has_google_key;
 }
 
@@ -474,8 +474,8 @@ function initEvents() {
       const data = await api('/api/import/preview',
         { method: 'POST', body: { text, ...importOptions() } });
       previewNames = data.names;
-      $('#run-import').disabled = !data.count || !(state.config && state.config.has_naver_keys);
-      const needsKeys = data.count && !(state.config && state.config.has_naver_keys);
+      $('#run-import').disabled = !data.count;
+      const noKeys = data.count && !(state.config && state.config.has_naver_keys);
 
       // 걸러 낸 곳은 이유별로 묶어서 접어 둔다
       const groups = new Map();
@@ -498,9 +498,10 @@ function initEvents() {
           data.count
             ? el('span', { class: 'muted' }, ' — 아래 목록이 맞으면 등록하세요')
             : el('span', { class: 'muted' }, ' — 네이버 지도 목록을 그대로 붙여넣어 보세요')),
-        needsKeys
-          ? el('p', { class: 'warn', style: 'margin:0 0 8px' },
-              '등록하려면 네이버 검색 API 키가 필요합니다 (좌표·거리·분류를 채우는 데 씁니다). 무료이고 카드 등록도 필요 없습니다.')
+        noKeys
+          ? el('p', { class: 'hint', style: 'margin:0 0 8px' },
+              '네이버 검색 API 키가 없어 좌표 없이 등록됩니다. 업종은 붙여넣기에서 읽어 오므로 추천은 그대로 됩니다. '
+              + '거리로 거르고 싶으면 지도를 회사 중심으로 확대해 원하는 범위만 보이게 한 뒤 그 목록을 붙여넣으세요.')
           : null,
         el('div', { class: 'preview-names' },
           ...data.names.map((n) => el('span', { class: 'pill' }, n))),
