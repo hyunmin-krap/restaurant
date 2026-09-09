@@ -103,17 +103,19 @@
     <div class="card block">
       <h3>네이버 지도 목록 붙여넣기</h3>
       <p class="hint">네이버 지도에서 <b>음식점 → 영업시간 → 요일·시간을 평일 12시</b>로 걸면
-        점심 장사하는 곳만 나옵니다. 그 목록의 상호명을 한 줄에 하나씩 붙여넣으세요.
+        점심 장사하는 곳만 나옵니다. 그 목록을 <b>드래그해서 그대로 복사·붙여넣기</b> 하세요.
+        분류·별점·주소·영업상태가 섞여 있어도 상호명만 알아서 골라냅니다.
         좌표·분류는 자동으로 채워지고 전부 '점심 영업'으로 표시됩니다.</p>
-      <label>상호명 목록
-        <textarea id="import-text" placeholder="마포 돼지국밥&#10;공덕 돈가스&#10;염리동 손칼국수"></textarea>
+      <label>네이버 지도에서 복사한 내용
+        <textarea id="import-text" placeholder="1&#10;공덕 돈까스&#10;돈까스&#10;4.52 (120)&#10;서울 마포구 만리재로 15&#10;영업 중 · 21:00에 영업 종료&#10;길찾기  저장  공유&#10;..."></textarea>
       </label>
+      <div id="import-preview" class="preview" hidden></div>
       <label class="inline" style="margin:10px 0">
         <input type="checkbox" id="import-exclusive">
         이 목록에 없는 기존 식당은 '점심 안 함'으로 표시
       </label>
       <div class="row">
-        <button id="run-import" class="primary">목록 등록</button>
+        <button id="run-import" class="primary" disabled>목록 등록</button>
         <span class="muted" id="import-msg"></span>
       </div>
     </div>

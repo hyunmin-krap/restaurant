@@ -224,6 +224,18 @@ a.btn:hover { border-color: var(--accent); color: var(--accent); }
 @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
 .wide { grid-column: 1 / -1; }
 
+.preview {
+  margin: 10px 0 4px; padding: 12px 14px; background: var(--bg-tint);
+  border-radius: 12px; border: 1px solid var(--border);
+}
+.preview-head { font-size: .85rem; font-weight: 700; margin-bottom: 8px; }
+.preview-head .muted { font-weight: 400; }
+.preview-names { display: flex; flex-wrap: wrap; gap: 5px; max-height: 160px; overflow-y: auto; }
+.pill {
+  font-size: .78rem; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+
 .progress { margin-top: 14px; }
 .bar { height: 8px; background: var(--sunken); border-radius: 999px; overflow: hidden; }
 .bar span {

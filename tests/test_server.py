@@ -184,3 +184,24 @@ class ReplaceCardTestCase(ServerTestCase):
         details = [i["detail_category"] for i in data["items"]]
         self.assertEqual(len(details), len(set(details)))
         self.assertLessEqual(len(details), len(FIXTURES))
+
+
+class ImportPreviewTestCase(ServerTestCase):
+    def test_preview_extracts_names_without_saving(self):
+        text = "1\n공덕 돈까스\n돈까스\n4.5 (12)\n서울 마포구 만리재로 15\n영업 중\n"
+        status, data = request(f"{self.base}/api/import/preview", "POST", {"text": text})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["names"], ["공덕 돈까스"])
+        _, places = request(f"{self.base}/api/places?radius=all")
+        self.assertNotIn("공덕 돈까스", [p["name"] for p in places["items"]])
+
+    def test_preview_of_junk_returns_empty(self):
+        status, data = request(f"{self.base}/api/import/preview", "POST",
+                               {"text": "길찾기\n저장\n영업 중\n한식"})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["count"], 0)
+
+    def test_import_rejects_text_with_no_names(self):
+        status, data = request(f"{self.base}/api/import", "POST", {"text": "길찾기\n저장"})
+        self.assertEqual(status, 400)
+        self.assertIn("상호명", data["error"])

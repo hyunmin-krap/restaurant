@@ -451,18 +451,55 @@ function initEvents() {
     } catch (e) { alert(e.message); }
   });
 
+  // 붙여넣는 대로 상호명을 뽑아 미리 보여 준다
+  let previewTimer = null;
+  let previewNames = [];
+  $('#import-text').addEventListener('input', () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const text = $('#import-text').value;
+      const box = $('#import-preview');
+      if (!text.trim()) {
+        box.hidden = true; previewNames = []; $('#run-import').disabled = true;
+        $('#import-msg').textContent = '';
+        return;
+      }
+      try {
+        const data = await api('/api/import/preview', { method: 'POST', body: { text } });
+        previewNames = data.names;
+        $('#run-import').disabled = !data.count || !(state.config && state.config.has_naver_keys);
+        const needsKeys = data.count && !(state.config && state.config.has_naver_keys);
+        box.replaceChildren(
+          el('div', { class: 'preview-head' },
+            data.count ? `상호명 ${data.count}곳을 찾았습니다` : '상호명을 찾지 못했습니다',
+            data.count
+              ? el('span', { class: 'muted' }, ' — 아래 목록이 맞으면 등록하세요')
+              : el('span', { class: 'muted' }, ' — 네이버 지도 목록을 그대로 붙여넣어 보세요')),
+          needsKeys
+            ? el('p', { class: 'warn', style: 'margin:0 0 8px' },
+                '등록하려면 네이버 검색 API 키가 필요합니다 (좌표·분류를 채우는 데 씁니다). 무료이고 카드 등록도 필요 없습니다.')
+            : null,
+          el('div', { class: 'preview-names' },
+            ...data.names.map((n) => el('span', { class: 'pill' }, n))));
+        box.hidden = false;
+      } catch (e) {
+        box.replaceChildren(el('div', { class: 'warn' }, e.message));
+        box.hidden = false;
+      }
+    }, 350);
+  });
+
   $('#run-import').addEventListener('click', async () => {
     const text = $('#import-text').value.trim();
-    if (!text) return alert('상호명을 한 줄에 하나씩 붙여넣어 주세요.');
-    const lines = text.split('\n').filter((l) => l.trim()).length;
+    if (!previewNames.length) return alert('등록할 상호명이 없습니다.');
     if ($('#import-exclusive').checked &&
-        !confirm(`${lines}곳을 등록하고, 이 목록에 없는 기존 식당은 전부 '점심 안 함'으로 표시합니다.\n계속할까요?`)) return;
+        !confirm(`${previewNames.length}곳을 등록하고, 이 목록에 없는 기존 식당은 전부 '점심 안 함'으로 표시합니다.\n계속할까요?`)) return;
     try {
       await api('/api/import', {
         method: 'POST',
         body: { text, mark_others_no_lunch: $('#import-exclusive').checked },
       });
-      $('#import-msg').textContent = `${lines}곳 등록 중…`;
+      $('#import-msg').textContent = `${previewNames.length}곳 등록 중…`;
       pollSync();
     } catch (e) { alert(e.message); }
   });

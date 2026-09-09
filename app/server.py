@@ -14,6 +14,7 @@ from typing import Any, Callable
 from . import budget as budget_mod
 from . import db as dbm
 from . import service
+from .paste import extract_names
 from .config import CONFIG, Config
 from .providers import (
     GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
@@ -287,11 +288,9 @@ def post_import(h: "LunchHandler", q, body):
     s = h.state
     if s.sync_state.running:
         raise ApiError(409, "이미 작업이 진행 중입니다.")
-    names = [line.strip() for line in (body.get("text") or "").splitlines() if line.strip()]
+    names = extract_names(body.get("text") or "")
     if not names:
-        raise ApiError(400, "상호명을 한 줄에 하나씩 붙여넣어 주세요.")
-    if len(names) > 300:
-        raise ApiError(400, "한 번에 300곳까지만 등록할 수 있습니다.")
+        raise ApiError(400, "상호명을 찾지 못했습니다. 네이버 지도 목록을 그대로 붙여넣어 보세요.")
     try:
         provider = NaverLocalProvider(s.config.naver_client_id, s.config.naver_client_secret)
     except ProviderError as exc:
@@ -305,6 +304,13 @@ def post_import(h: "LunchHandler", q, body):
         s.sync_state,
     )
     return {"started": True, "count": len(names)}
+
+
+@route("POST", "/api/import/preview")
+def post_import_preview(h: "LunchHandler", q, body):
+    """붙여넣은 덩어리에서 상호명을 뽑아 보여만 준다. 등록하지 않는다."""
+    names = extract_names(body.get("text") or "")
+    return {"names": names, "count": len(names)}
 
 
 @route("POST", "/api/enrich")
