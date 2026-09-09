@@ -73,7 +73,7 @@ def sync_places(
     return added
 
 
-def enrich_taste(
+def enrich_places(
     conn: sqlite3.Connection,
     reviewer: NaverPlaceReviewProvider,
     limit: int = 50,
@@ -81,53 +81,178 @@ def enrich_taste(
     lock: threading.Lock | None = None,
     only_missing: bool = True,
 ) -> int:
-    """'음식이 맛있어요' 비율을 채운다. 실패한 곳은 조용히 건너뛴다."""
+    """'음식이 맛있어요' 비율과 영업시간(점심 영업 여부)을 채운다.
+
+    네이버 지도에서 [영업중 · 12시] 필터를 거는 것과 같은 판정을 자동으로 한다.
+    사람이 손으로 표시한 값(lunch_source='manual')은 덮어쓰지 않는다.
+    실패한 곳은 조용히 건너뛴다.
+    """
     state = state or SyncState()
     sql = """SELECT id, name, road_address, address, link, naver_place_id
                FROM places WHERE is_active = 1"""
     if only_missing:
-        sql += " AND (taste_ratio IS NULL AND (taste_source IS NULL OR taste_source <> 'manual'))"
+        sql += """ AND (
+                    (taste_ratio IS NULL AND (taste_source IS NULL OR taste_source <> 'manual'))
+                 OR (lunch_open  IS NULL AND (lunch_source IS NULL OR lunch_source <> 'manual'))
+               )"""
     sql += " ORDER BY distance_m LIMIT ?"
     rows = conn.execute(sql, (limit,)).fetchall()
     state.total = len(rows)
     filled = 0
+
     for idx, row in enumerate(rows, start=1):
         state.done = idx
-        stats = reviewer.enrich(
+        info = reviewer.enrich(
             name=row["name"],
             address=row["road_address"] or row["address"] or "",
             link=row["link"] or "",
             place_id=row["naver_place_id"],
         )
-        if not stats:
-            state.message = f"{row['name']} — 리뷰 지표 없음"
+        if not info:
+            state.message = f"{row['name']} — 정보 없음"
             state.log.append(state.message)
             continue
-        writes = [
-            lambda: dbm.set_taste(
-                conn, row["id"], stats.get("ratio"), stats.get("votes"),
-                stats.get("review_total") or stats.get("total"), "naver_place",
-            ),
-            lambda: conn.execute(
-                "UPDATE places SET naver_place_id = ? WHERE id = ?",
-                (stats.get("place_id"), row["id"]),
-            ),
-        ]
+
+        notes = []
+        if info.get("ratio") is not None:
+            notes.append(f"맛있어요 {round(info['ratio'] * 100)}%")
+        if "lunch_open" in info:
+            notes.append("점심 영업" if info["lunch_open"] else "점심 안 함")
+
+        def write() -> None:
+            if info.get("ratio") is not None:
+                dbm.set_taste(
+                    conn, row["id"], info.get("ratio"), info.get("votes"),
+                    info.get("review_total") or info.get("total"), "naver_place",
+                )
+            if "lunch_open" in info:
+                # 사람이 이미 표시해 둔 곳은 자동 판정으로 덮지 않는다.
+                current = conn.execute(
+                    "SELECT lunch_source FROM places WHERE id = ?", (row["id"],)
+                ).fetchone()
+                if not current or current["lunch_source"] != "manual":
+                    dbm.set_lunch_open(
+                        conn, row["id"], info["lunch_open"], "naver_place",
+                        info.get("business_hours"),
+                    )
+            if info.get("place_id"):
+                conn.execute(
+                    "UPDATE places SET naver_place_id = ? WHERE id = ?",
+                    (info["place_id"], row["id"]),
+                )
+            conn.commit()
+
         if lock:
             with lock:
-                for write in writes:
-                    write()
-                conn.commit()
-        else:
-            for write in writes:
                 write()
-            conn.commit()
+        else:
+            write()
+
         filled += 1
         state.added = filled
-        pct = round((stats.get("ratio") or 0) * 100)
-        state.message = f"{row['name']} — 맛있어요 {pct}%"
+        state.message = f"{row['name']} — " + (" · ".join(notes) or "갱신")
         state.log.append(state.message)
     return filled
+
+
+# 예전 이름. 하는 일이 늘어서 이름을 바꿨다.
+enrich_taste = enrich_places
+
+
+def import_named_places(
+    conn: sqlite3.Connection,
+    provider: NaverLocalProvider,
+    names: list[str],
+    office_lat: float,
+    office_lng: float,
+    area_keyword: str = "",
+    mark_others_no_lunch: bool = False,
+    state: SyncState | None = None,
+    lock: threading.Lock | None = None,
+) -> int:
+    """상호명 목록을 받아 좌표·분류를 채워 등록하고 '점심 영업'으로 표시한다.
+
+    네이버 지도에서 [영업중 · 12시] 필터를 걸고 나온 목록을 그대로 붙여넣는 용도.
+    mark_others_no_lunch 를 켜면 목록에 없는 기존 식당을 '점심 안 함'으로 돌린다.
+    (= 붙여넣은 목록이 점심 영업하는 곳 전부라고 선언하는 것)
+    """
+    state = state or SyncState()
+    state.total = len(names)
+    imported_ids: set[str] = set()
+
+    for idx, raw_name in enumerate(names, start=1):
+        state.done = idx
+        name = raw_name.strip()
+        if not name:
+            continue
+        query = f"{area_keyword} {name}".strip()
+        try:
+            items = provider.search(query, display=5)
+        except ProviderError as exc:
+            state.message = f"{name} — 검색 실패: {exc}"
+            state.log.append(state.message)
+            continue
+
+        matched = None
+        for item in items:
+            place = provider._to_place(item, (office_lat, office_lng))
+            if place and place.name.replace(" ", "") == name.replace(" ", ""):
+                matched = place
+                break
+        if matched is None:
+            state.message = f"{name} — 못 찾음 (상호명을 지도와 똑같이 적어 주세요)"
+            state.log.append(state.message)
+            continue
+
+        major, detail = classify(matched.raw_category, matched.name)
+        row = {
+            "id": matched.id, "name": matched.name,
+            "road_address": matched.road_address, "address": matched.address,
+            "lat": matched.lat, "lng": matched.lng, "raw_category": matched.raw_category,
+            "major_category": major, "detail_category": detail,
+            "phone": matched.phone, "link": matched.link,
+            "naver_place_id": matched.naver_place_id,
+            "distance_m": matched.distance_m, "source": "naver_import",
+        }
+
+        def write() -> None:
+            dbm.upsert_place(conn, row)
+            dbm.set_lunch_open(conn, row["id"], True, "manual")
+            conn.commit()
+
+        if lock:
+            with lock:
+                write()
+        else:
+            write()
+
+        imported_ids.add(matched.id)
+        state.added = len(imported_ids)
+        state.message = f"{matched.name} — 등록 ({major}·{detail}, {round(matched.distance_m or 0)}m)"
+        state.log.append(state.message)
+
+    if mark_others_no_lunch and imported_ids:
+        marks = [
+            (r["id"],)
+            for r in conn.execute(
+                "SELECT id FROM places WHERE is_active = 1 AND lunch_open IS NOT 0"
+            ).fetchall()
+            if r["id"] not in imported_ids
+        ]
+
+        def write_others() -> None:
+            for (pid,) in marks:
+                dbm.set_lunch_open(conn, pid, False, "manual")
+            conn.commit()
+
+        if lock:
+            with lock:
+                write_others()
+        else:
+            write_others()
+        state.log.append(f"목록에 없는 {len(marks)}곳을 '점심 안 함'으로 표시했습니다.")
+
+    return len(imported_ids)
 
 
 def run_in_thread(fn: Callable[[], Any], state: SyncState) -> threading.Thread:

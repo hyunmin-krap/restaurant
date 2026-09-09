@@ -162,3 +162,36 @@ class TestDistanceWeighting(unittest.TestCase):
         # 60% 안팎이면 '조금 더 자주'. 80% 를 넘으면 쏠린 것.
         self.assertGreater(wins, 330)
         self.assertLess(wins, 480)
+
+
+class TestPerDrawDedup(unittest.TestCase):
+    """중복 금지는 '한 번의 추천 안에서'만. 다시 뽑으면 다른 돈가스가 나와야 한다."""
+
+    def _pool(self):
+        return [place(f"{n}돈가스", "일식", "돈가스") for n in "ABCD"] + [
+            place("국밥집", "한식", "국밥"), place("피자집", "양식", "피자"),
+            place("짬뽕집", "중식", "짬뽕"), place("김밥집", "분식", "김밥"),
+        ]
+
+    def test_never_two_of_the_same_food_in_one_draw(self):
+        pool = self._pool()
+        for seed in range(200):
+            picks = recommend(pool, count=3, rng=random.Random(seed))
+            details = [p.place["detail_category"] for p in picks]
+            self.assertEqual(len(details), len(set(details)), details)
+
+    def test_different_shops_of_the_same_food_appear_across_draws(self):
+        pool = self._pool()
+        seen = set()
+        for seed in range(120):
+            for pick in recommend(pool, count=3, rng=random.Random(seed)):
+                if pick.place["detail_category"] == "돈가스":
+                    seen.add(pick.place["id"])
+        # 4곳 전부 언젠가는 나와야 한다 - 한 곳이 자리를 독점하면 안 된다
+        self.assertEqual(seen, {"A돈가스", "B돈가스", "C돈가스", "D돈가스"}, seen)
+
+    def test_exclude_details_blocks_foods_already_on_screen(self):
+        picks = recommend(self._pool(), count=3, rng=random.Random(3),
+                          exclude_details={"돈가스", "국밥"})
+        details = {p.place["detail_category"] for p in picks}
+        self.assertFalse(details & {"돈가스", "국밥"}, details)

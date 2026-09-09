@@ -15,6 +15,7 @@ import re
 import time
 import urllib.parse
 
+from ..hours import parse_business_hours
 from .base import ProviderError, http_json
 
 GRAPHQL_ENDPOINT = "https://pcmap-api.place.naver.com/graphql"
@@ -37,6 +38,16 @@ query getVisitorReviewStats($input: VisitorReviewStatsInput) {
         details { code displayName category count }
       }
     }
+  }
+}
+"""
+
+# 영업시간. 네이버 지도의 [영업중 · 12시] 필터와 같은 판정을 하기 위해 가져온다.
+_HOURS_QUERY = """
+query getRestaurant($id: String!) {
+  restaurant(id: $id) {
+    businessHours { day startTime endTime breakHours { start end } }
+    newBusinessHours { status description businessStatusDescription }
   }
 }
 """
@@ -129,12 +140,68 @@ class NaverPlaceReviewProvider:
                 }
         return None
 
-    def enrich(self, name: str, address: str = "", link: str = "", place_id: str | None = None) -> dict | None:
+    def fetch_business_hours(self, place_id: str) -> dict | None:
+        """{'lunch_open': bool, 'text': str} 또는 None. 실패는 조용히 None."""
+        body = json.dumps(
+            [{
+                "operationName": "getRestaurant",
+                "query": _HOURS_QUERY,
+                "variables": {"id": str(place_id)},
+            }]
+        ).encode("utf-8")
+        try:
+            payload = http_json(
+                GRAPHQL_ENDPOINT,
+                headers={
+                    "Content-Type": "application/json",
+                    "Referer": f"https://pcmap.place.naver.com/restaurant/{place_id}/home",
+                },
+                data=body,
+                timeout=self.timeout,
+            )
+        except ProviderError:
+            return None
+        return self.parse_hours(payload)
+
+    @staticmethod
+    def parse_hours(payload) -> dict | None:
+        """GraphQL 응답에서 영업시간을 꺼내 점심 영업 여부를 판정한다."""
+        if isinstance(payload, list):
+            payload = payload[0] if payload else {}
+        restaurant = (((payload or {}).get("data") or {}).get("restaurant")) or {}
+        for key in ("businessHours", "newBusinessHours"):
+            raw = restaurant.get(key)
+            if not raw:
+                continue
+            parsed = parse_business_hours(raw)
+            if parsed:
+                return parsed
+        # 구조화된 값이 없으면 설명 문장이라도 훑어본다.
+        blob = restaurant.get("newBusinessHours")
+        if isinstance(blob, list):
+            for item in blob:
+                if isinstance(item, dict):
+                    text = item.get("description") or item.get("businessStatusDescription")
+                    parsed = parse_business_hours(text)
+                    if parsed:
+                        return parsed
+        return None
+
+    def enrich(self, name: str, address: str = "", link: str = "",
+               place_id: str | None = None, with_hours: bool = True) -> dict | None:
+        """리뷰 지표와 영업시간을 한 번에 가져온다. 둘 중 하나만 성공해도 돌려준다."""
         pid = place_id or self.place_id_from_link(link) or self.resolve_place_id(name, address)
         if not pid:
             return None
         time.sleep(self.request_delay)
+        result: dict = {"place_id": pid}
         stats = self.fetch_taste_ratio(pid)
         if stats:
-            stats["place_id"] = pid
-        return stats
+            result.update(stats)
+        if with_hours:
+            time.sleep(self.request_delay)
+            hours = self.fetch_business_hours(pid)
+            if hours:
+                result["lunch_open"] = hours["lunch_open"]
+                result["business_hours"] = hours["text"]
+        return result if len(result) > 1 else None

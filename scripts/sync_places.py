@@ -16,34 +16,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import db as dbm  # noqa: E402
 from app.config import CONFIG  # noqa: E402
 from app.providers import NaverLocalProvider, NaverPlaceReviewProvider, ProviderError  # noqa: E402
-from app.sync import SyncState, enrich_taste, sync_places  # noqa: E402
+from app.sync import SyncState, enrich_places, sync_places  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="회사 주변 식당 수집")
     parser.add_argument("--area", help="지역 검색 키워드 (예: 역삼동, 판교역)")
     parser.add_argument("--radius", type=int, default=CONFIG.radius_m, help="반경(m)")
-    parser.add_argument("--taste", action="store_true", help="'음식이 맛있어요' 비율 채우기")
-    parser.add_argument("--limit", type=int, default=50, help="--taste 일 때 처리할 식당 수")
-    parser.add_argument("--refresh", action="store_true", help="--taste 일 때 이미 있는 값도 갱신")
+    parser.add_argument("--enrich", "--taste", dest="enrich", action="store_true",
+                        help="'맛있어요' 비율과 영업시간(점심 영업 여부) 채우기")
+    parser.add_argument("--limit", type=int, default=50, help="--enrich 일 때 처리할 식당 수")
+    parser.add_argument("--refresh", action="store_true", help="--enrich 일 때 이미 있는 값도 갱신")
     args = parser.parse_args()
 
     conn = dbm.connect(CONFIG.db_path)
     dbm.init_db(conn)
     state = SyncState()
 
-    if args.taste:
+    if args.enrich:
         if not CONFIG.enable_place_review_scrape:
             print("ENABLE_PLACE_REVIEW_SCRAPE=1 로 켜야 실행됩니다.")
             print("(네이버 공식 API 가 아니라 언제든 막힐 수 있는 비공식 경로입니다.)")
             return 1
-        filled = enrich_taste(
+        filled = enrich_places(
             conn, NaverPlaceReviewProvider(), limit=args.limit,
             state=state, only_missing=not args.refresh,
         )
         for line in state.log:
             print(" ", line)
-        print(f"\n{filled}곳에 '맛있어요' 비율을 채웠습니다.")
+        print(f"\n{filled}곳을 갱신했습니다 (맛있어요 비율 · 점심 영업 여부).")
         return 0
 
     area = args.area or dbm.get_setting(conn, "area_keyword")

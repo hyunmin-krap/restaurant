@@ -40,6 +40,9 @@
           <option value="3" selected>3곳</option>
           <option value="4">4곳</option>
           <option value="5">5곳</option>
+          <option value="6">6곳</option>
+          <option value="8">8곳</option>
+          <option value="10">10곳</option>
         </select>
       </label>
     </div>
@@ -74,7 +77,7 @@
         <label>위도 <span class="tip" title="네이버 지도에서 건물을 찍으면 주소창이 c=경도,위도,... 로 바뀝니다. 그 값을 넣으세요.">?</span><input id="cfg-lat" type="number" step="0.0000001"></label>
         <label>경도<input id="cfg-lng" type="number" step="0.0000001"></label>
         <label>반경(m)<input id="cfg-radius" type="number" min="100" step="50"></label>
-        <label>추천 개수<input id="cfg-count" type="number" min="1" max="6"></label>
+        <label>추천 개수<input id="cfg-count" type="number" min="1" max="12"></label>
       </div>
       <button id="cfg-save" class="primary">저장</button>
       <span class="muted" id="cfg-saved"></span>
@@ -82,16 +85,36 @@
 
     <div class="card block">
       <h3>식당 수집</h3>
-      <p class="hint">네이버 지역검색으로 지역 키워드 주변 식당을 모읍니다. 반경 밖은 자동으로 걸러집니다.</p>
+      <p class="hint">네이버 지역검색으로 지역 키워드 주변 식당을 모읍니다. 반경 밖은 자동으로 걸러집니다.
+        '리뷰·영업시간 채우기'는 '음식이 맛있어요' 비율과 영업시간을 가져와
+        <b>점심에 문 여는 곳인지 자동으로 판정</b>합니다.</p>
       <div class="row">
         <button id="run-sync" class="primary">주변 식당 수집</button>
-        <button id="run-enrich">리뷰 지표 채우기</button>
+        <button id="run-enrich">리뷰·영업시간 채우기</button>
       </div>
       <div class="progress" id="sync-progress" hidden>
         <div class="bar"><span id="sync-bar"></span></div>
         <p class="muted" id="sync-msg"></p>
       </div>
       <p class="warn" id="sync-warn" hidden></p>
+    </div>
+
+    <div class="card block">
+      <h3>네이버 지도 목록 붙여넣기</h3>
+      <p class="hint">네이버 지도에서 <b>음식점 → 영업시간 → 요일·시간을 평일 12시</b>로 걸면
+        점심 장사하는 곳만 나옵니다. 그 목록의 상호명을 한 줄에 하나씩 붙여넣으세요.
+        좌표·분류는 자동으로 채워지고 전부 '점심 영업'으로 표시됩니다.</p>
+      <label>상호명 목록
+        <textarea id="import-text" placeholder="마포 돼지국밥&#10;공덕 돈가스&#10;염리동 손칼국수"></textarea>
+      </label>
+      <label class="inline" style="margin:10px 0">
+        <input type="checkbox" id="import-exclusive">
+        이 목록에 없는 기존 식당은 '점심 안 함'으로 표시
+      </label>
+      <div class="row">
+        <button id="run-import" class="primary">목록 등록</button>
+        <span class="muted" id="import-msg"></span>
+      </div>
     </div>
 
     <div class="card block">

@@ -65,6 +65,9 @@ def serialize_place(
     place: dict[str, Any],
     office: tuple[float, float] | None = None,
     office_name: str = "회사",
+    exclude_ids: set[str] | None = None,
+    exclude_details: set[str] | None = None,
+    exclude_majors: set[str] | None = None,
 ) -> dict[str, Any]:
     distance = place.get("distance_m")
     taste = place.get("taste_ratio")
@@ -108,10 +111,18 @@ def make_recommendation(
     rng: random.Random | None = None,
     office: tuple[float, float] | None = None,
     office_name: str = "회사",
+    exclude_ids: set[str] | None = None,
+    exclude_details: set[str] | None = None,
+    exclude_majors: set[str] | None = None,
 ) -> dict[str, Any]:
     rng = rng or random.Random()
     candidates = load_candidates(conn, radius_m)
-    picks: list[Pick] = recommend(candidates, count=count, radius_m=radius_m, rng=rng)
+    if exclude_ids:
+        candidates = [c for c in candidates if c["id"] not in exclude_ids]
+    picks: list[Pick] = recommend(
+        candidates, count=count, radius_m=radius_m, rng=rng,
+        exclude_details=exclude_details, exclude_majors=exclude_majors,
+    )
 
     bid = batch_id(rng)
     if record and picks:

@@ -3,7 +3,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
-const state = { config: null, places: [], rating: { placeId: null, stars: 0 } };
+const state = { config: null, places: [], rating: { placeId: null, stars: 0 }, current: [] };
 
 // ── API ────────────────────────────────────────────────────────────
 async function api(path, options = {}) {
@@ -51,9 +51,56 @@ function openNaver(item) {
 }
 
 const pct = (r) => (r === null || r === undefined ? null : Math.round(r * 100));
+const CATEGORY_COLORS = {
+  한식: '#ff6b35', 중식: '#f43f5e', 일식: '#2f8fff', 양식: '#8b5cf6', 아시아: '#10b981',
+  분식: '#f59e0b', 치킨: '#eab308', 패스트푸드: '#06b6d4', 뷔페: '#ec4899', 기타: '#64748b',
+};
+const catColor = (major) => CATEGORY_COLORS[major] || CATEGORY_COLORS.기타;
+
 const starText = (avg) => '★'.repeat(Math.round(avg)) + '☆'.repeat(5 - Math.round(avg));
 
 // ── 추천 카드 ──────────────────────────────────────────────────────
+// 화면의 다른 카드는 그대로 두고, 이 카드 한 장만 다른 식당으로 바꾼다.
+async function replaceCard(item, node, reason) {
+  const others = state.current.filter((x) => x.id !== item.id);
+  const params = new URLSearchParams({
+    count: '1',
+    radius: $('#radius-quick').value,
+    exclude: [...state.current.map((x) => x.id), item.id].join(','),
+    exclude_detail: others.map((x) => x.detail_category).join(','),
+    exclude_major: others.map((x) => x.major_category).join(','),
+  });
+  const data = await api(`/api/recommend?${params}`);
+  if (!data.items.length) {
+    disableCard(item, node, reason || '제외됨');
+    $('#pick-note').textContent = '대신 넣을 만한 다른 분류의 식당이 없습니다. 반경을 넓혀 보세요.';
+    return;
+  }
+  const next = data.items[0];
+  state.current = state.current.map((x) => (x.id === item.id ? next : x));
+  node.replaceWith(cardFor(next));
+  $('#pick-note').textContent = '';
+}
+
+// 카드를 비활성 상태로만 바꾼다 (다른 카드는 건드리지 않는다)
+function disableCard(item, node, label) {
+  node.classList.add('disabled');
+  const badge = node.querySelector('.card-state');
+  if (badge) badge.textContent = label;
+  else node.querySelector('.name').append(el('span', { class: 'card-state' }, label));
+  node.querySelectorAll('.row').forEach((r) => r.remove());
+  node.append(el('div', { class: 'row' },
+    el('button', { onclick: () => restoreCard(item, node) }, '↩︎ 되돌리기'),
+    el('button', { class: 'primary', onclick: () => replaceCard(item, node) }, '🔄 다른 곳 보기')));
+}
+
+async function restoreCard(item, node) {
+  await api(`/api/blocks?place_id=${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+  await api('/api/lunch', { method: 'POST', body: { place_id: item.id, open: null } });
+  node.replaceWith(cardFor(item));
+  loadStats();
+}
+
 function cardFor(item) {
   const taste = pct(item.taste_ratio);
   const metrics = [];
@@ -88,13 +135,13 @@ function cardFor(item) {
   return el('div', { class: 'card' },
     el('p', { class: 'name' },
       el('a', { href: item.map_url, target: '_blank', rel: 'noopener' }, item.name)),
-    el('div', { class: 'badges' },
+    el('div', { class: 'badges', style: `--cat:${catColor(item.major_category)}` },
       el('span', { class: 'badge' }, item.major_category),
       item.detail_category && item.detail_category !== item.major_category
         ? el('span', { class: 'badge plain' }, item.detail_category) : null),
     el('p', { class: 'muted', style: 'margin:0 0 8px' }, item.address || ''),
     ...metrics,
-    item.business_hours ? el('p', { class: 'muted', style: 'margin:6px 0 0' }, item.business_hours) : null,
+    item.business_hours ? el('p', { class: 'hours' }, `🕒 ${item.business_hours}`) : null,
     el('p', { class: 'why' }, item.why || ''),
     el('div', { class: 'row' },
       el('button', { class: 'primary', onclick: () => openNaver(item) }, '📍 네이버 지도'),
@@ -103,8 +150,9 @@ function cardFor(item) {
         : null),
     el('div', { class: 'row compact' },
       el('button', { onclick: () => openRating(item) }, '⭐ 별점'),
-      el('button', { title: '점심 장사를 안 하는 곳으로 표시', onclick: () => markNoLunch(item) }, '🕛 점심 안 함'),
-      el('button', { title: '추천 후보에서 제외', onclick: () => blockPlace(item) }, '🚫 다시 안 보기')));
+      el('button', { title: '이 자리만 다른 식당으로 교체', onclick: (e) => replaceCard(item, e.target.closest('.card')) }, '🔄 다른 곳'),
+      el('button', { title: '점심 장사를 안 하는 곳으로 표시', onclick: (e) => markNoLunch(item, e.target.closest('.card')) }, '🕛 점심 안 함'),
+      el('button', { title: '추천 후보에서 영구 제외', onclick: (e) => blockPlace(item, e.target.closest('.card')) }, '🚫 다시 안 보기')));
 }
 
 async function draw() {
@@ -121,6 +169,7 @@ async function draw() {
     if (!data.items.length) {
       cards.append(el('p', { class: 'empty' }, '추천할 식당이 없습니다. 설정 탭에서 식당을 먼저 수집하세요.'));
     } else {
+      state.current = data.items;
       data.items.forEach((item) => cards.append(cardFor(item)));
     }
   } catch (err) {
@@ -131,22 +180,25 @@ async function draw() {
   }
 }
 
-async function blockPlace(item) {
+// 영구 제외. 나머지 카드는 그대로 두고 이 카드만 비활성 처리한다.
+async function blockPlace(item, node) {
   const reason = prompt(
-    `'${item.name}'을(를) 추천에서 뺍니다.\n이유(선택) — 예: 폐업, 웨이팅 너무 김, 입맛에 안 맞음`, '');
+    `'${item.name}'을(를) 앞으로 추천에서 뺍니다.\n이유(선택) — 예: 폐업, 웨이팅 너무 김, 입맛에 안 맞음`, '');
   if (reason === null) return;
   await api('/api/blocks', {
     method: 'POST',
     body: { place_id: item.id, reason, by: localStorage.getItem('rater') || '' },
   });
-  await Promise.all([draw(), loadBlocks(), loadStats()]);
+  disableCard(item, node, '제외됨');
+  loadBlocks(); loadStats();
 }
 
 // 점심 장사를 안 하는 곳(저녁만 하는 집 등). 한 번 표시하면 팀 전체에 적용된다.
-async function markNoLunch(item) {
+async function markNoLunch(item, node) {
   if (!confirm(`'${item.name}'은(는) 점심에 영업하지 않나요?\n표시하면 앞으로 추천에서 빠집니다.`)) return;
   await api('/api/lunch', { method: 'POST', body: { place_id: item.id, open: false } });
-  await Promise.all([draw(), loadPlaces(), loadStats()]);
+  disableCard(item, node, '점심 안 함');
+  loadStats();
 }
 
 // ── 별점 ───────────────────────────────────────────────────────────
@@ -218,6 +270,7 @@ async function loadHistory() {
 function placeRow(p) {
   const taste = pct(p.taste_ratio);
   return el('div', { class: `place-row${p.blocked || p.lunch_open === 0 ? ' blocked' : ''}` },
+    el('span', { class: 'dot', style: `--cat:${catColor(p.major_category)}` }),
     el('span', { class: 'grow' },
       el('div', {}, el('a', { href: p.map_url, target: '_blank', rel: 'noopener', style: 'color:inherit' }, p.name),
         ' ', el('span', { class: 'muted' }, `${p.major_category}${p.detail_category && p.detail_category !== p.major_category ? ' · ' + p.detail_category : ''}`)),
@@ -316,7 +369,7 @@ async function loadConfig() {
   $('#cfg-radius').value = cfg.radius_m;
   $('#cfg-count').value = cfg.recommend_count;
   $('#radius-quick').value = [300, 500, 800, 1200].includes(cfg.radius_m) ? cfg.radius_m : 500;
-  $('#count-quick').value = Math.min(5, Math.max(2, cfg.recommend_count));
+  $('#count-quick').value = [2,3,4,5,6,8,10].includes(cfg.recommend_count) ? cfg.recommend_count : 3;
   const warn = $('#sync-warn');
   const notes = [];
   if (!cfg.has_naver_keys) notes.push('네이버 API 키가 없어 식당 수집을 실행할 수 없습니다. .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 넣어 주세요.');
@@ -324,6 +377,7 @@ async function loadConfig() {
   warn.textContent = notes.join('\n');
   warn.hidden = !notes.length;
   $('#run-sync').disabled = !cfg.has_naver_keys;
+  $('#run-import').disabled = !cfg.has_naver_keys;
   $('#run-enrich').disabled = !cfg.review_scrape_enabled;
 }
 
@@ -393,6 +447,22 @@ function initEvents() {
   $('#run-enrich').addEventListener('click', async () => {
     try {
       await api('/api/enrich', { method: 'POST', body: { limit: 60 } });
+      pollSync();
+    } catch (e) { alert(e.message); }
+  });
+
+  $('#run-import').addEventListener('click', async () => {
+    const text = $('#import-text').value.trim();
+    if (!text) return alert('상호명을 한 줄에 하나씩 붙여넣어 주세요.');
+    const lines = text.split('\n').filter((l) => l.trim()).length;
+    if ($('#import-exclusive').checked &&
+        !confirm(`${lines}곳을 등록하고, 이 목록에 없는 기존 식당은 전부 '점심 안 함'으로 표시합니다.\n계속할까요?`)) return;
+    try {
+      await api('/api/import', {
+        method: 'POST',
+        body: { text, mark_others_no_lunch: $('#import-exclusive').checked },
+      });
+      $('#import-msg').textContent = `${lines}곳 등록 중…`;
       pollSync();
     } catch (e) { alert(e.message); }
   });

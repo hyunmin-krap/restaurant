@@ -18,6 +18,7 @@ from app import db as dbm  # noqa: E402
 from app.categories import classify  # noqa: E402
 from app.config import CONFIG  # noqa: E402
 from app.geo import haversine_m  # noqa: E402
+from app.hours import parse_business_hours  # noqa: E402
 
 DATA = Path(__file__).resolve().parent.parent / "data" / "demo_places.json"
 
@@ -39,9 +40,19 @@ def main() -> int:
         })
         if row.get("taste") is not None:
             dbm.set_taste(conn, f"demo:{row['name']}", row["taste"], None, row.get("reviews"), "manual")
+        # 영업시간에서 점심 영업 여부를 판정한다 (실제 수집 때와 같은 로직)
+        parsed = parse_business_hours(row.get("hours"))
+        if parsed:
+            dbm.set_lunch_open(conn, f"demo:{row['name']}", parsed["lunch_open"],
+                               "naver_place", parsed["text"])
     conn.commit()
     count = conn.execute("SELECT COUNT(*) c FROM places WHERE source='demo'").fetchone()["c"]
-    print(f"데모 식당 {count}곳을 넣었습니다. python3 -m app 으로 서버를 켜 보세요.")
+    no_lunch = conn.execute(
+        "SELECT COUNT(*) c FROM places WHERE source='demo' AND lunch_open = 0"
+    ).fetchone()["c"]
+    print(f"데모 식당 {count}곳을 넣었습니다 "
+          f"(영업시간 판정으로 {no_lunch}곳은 '점심 안 함'으로 제외).")
+    print("python3 -m app 으로 서버를 켜 보세요.")
     return 0
 
 

@@ -15,7 +15,7 @@ from . import db as dbm
 from . import service
 from .config import CONFIG, Config
 from .providers import NaverLocalProvider, NaverPlaceReviewProvider, ProviderError
-from .sync import SyncState, enrich_taste, run_in_thread, sync_places
+from .sync import SyncState, enrich_places, import_named_places, run_in_thread, sync_places
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -115,6 +115,9 @@ def get_recommend(h: "LunchHandler", q, body):
         return service.make_recommendation(
             s.conn, radius_m=radius, count=count, record=record, rng=random.Random(),
             office=s.office, office_name=s.setting_str("office_name", s.config.office_name),
+            exclude_ids=_csv_param(q, "exclude"),
+            exclude_details=_csv_param(q, "exclude_detail"),
+            exclude_majors=_csv_param(q, "exclude_major"),
         )
 
 
@@ -272,13 +275,39 @@ def post_sync(h: "LunchHandler", q, body):
     return {"started": True, "area": area, "radius": radius}
 
 
+@route("POST", "/api/import")
+def post_import(h: "LunchHandler", q, body):
+    """네이버 지도 [영업중 · 12시] 필터 목록을 붙여넣어 한 번에 등록."""
+    s = h.state
+    if s.sync_state.running:
+        raise ApiError(409, "이미 작업이 진행 중입니다.")
+    names = [line.strip() for line in (body.get("text") or "").splitlines() if line.strip()]
+    if not names:
+        raise ApiError(400, "상호명을 한 줄에 하나씩 붙여넣어 주세요.")
+    if len(names) > 300:
+        raise ApiError(400, "한 번에 300곳까지만 등록할 수 있습니다.")
+    try:
+        provider = NaverLocalProvider(s.config.naver_client_id, s.config.naver_client_secret)
+    except ProviderError as exc:
+        raise ApiError(400, str(exc)) from exc
+    lat, lng = s.office
+    s.sync_state = SyncState()
+    run_in_thread(
+        partial(import_named_places, s.conn, provider, names, lat, lng,
+                s.area_keyword, bool(body.get("mark_others_no_lunch")),
+                state=s.sync_state, lock=s.lock),
+        s.sync_state,
+    )
+    return {"started": True, "count": len(names)}
+
+
 @route("POST", "/api/enrich")
 def post_enrich(h: "LunchHandler", q, body):
     s = h.state
     if not s.config.enable_place_review_scrape:
         raise ApiError(
             400,
-            "리뷰 지표 수집이 꺼져 있습니다. .env 에서 ENABLE_PLACE_REVIEW_SCRAPE=1 로 켜세요. "
+            "리뷰·영업시간 수집이 꺼져 있습니다. .env 에서 ENABLE_PLACE_REVIEW_SCRAPE=1 로 켜세요. "
             "(네이버 공식 API 가 아니라 언제든 막힐 수 있습니다.)",
         )
     if s.sync_state.running:
@@ -286,7 +315,7 @@ def post_enrich(h: "LunchHandler", q, body):
     limit = int(body.get("limit") or 50)
     s.sync_state = SyncState()
     run_in_thread(
-        partial(enrich_taste, s.conn, NaverPlaceReviewProvider(), limit,
+        partial(enrich_places, s.conn, NaverPlaceReviewProvider(), limit,
                 state=s.sync_state, lock=s.lock),
         s.sync_state,
     )
@@ -299,6 +328,12 @@ def _int_param(q: dict[str, list[str]], key: str, default: int) -> int:
         return int(q.get(key, [default])[0])
     except (TypeError, ValueError):
         return default
+
+
+def _csv_param(q: dict[str, list[str]], key: str) -> set[str]:
+    """?exclude=a,b,c -> {'a','b','c'}"""
+    raw = q.get(key, [""])[0]
+    return {v.strip() for v in raw.split(",") if v.strip()}
 
 
 def _float_or_none(value: Any) -> float | None:

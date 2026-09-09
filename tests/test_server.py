@@ -150,3 +150,37 @@ class ServerTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplaceCardTestCase(ServerTestCase):
+    """카드 한 장만 교체할 때: 화면에 있는 분류와 겹치지 않는 다른 곳이 와야 한다."""
+
+    def test_exclude_skips_named_places(self):
+        _, data = request(
+            f"{self.base}/api/recommend?count=1&record=0&exclude="
+            + urllib.parse.quote("t:가돈가스,t:나국밥")
+        )
+        self.assertTrue(data["items"])
+        self.assertNotIn(data["items"][0]["id"], {"t:가돈가스", "t:나국밥"})
+
+    def test_exclude_detail_avoids_same_food(self):
+        for _ in range(15):
+            _, data = request(
+                f"{self.base}/api/recommend?count=1&record=0&exclude_detail="
+                + urllib.parse.quote("돈가스,국밥")
+            )
+            for item in data["items"]:
+                self.assertNotIn(item["detail_category"], {"돈가스", "국밥"})
+
+    def test_exclude_everything_returns_empty(self):
+        ids = ",".join(p[0] and f"t:{p[0]}" for p in FIXTURES)
+        _, data = request(
+            f"{self.base}/api/recommend?count=1&record=0&exclude=" + urllib.parse.quote(ids)
+        )
+        self.assertEqual(data["items"], [])
+
+    def test_larger_counts_are_accepted(self):
+        _, data = request(f"{self.base}/api/recommend?count=10&record=0")
+        details = [i["detail_category"] for i in data["items"]]
+        self.assertEqual(len(details), len(set(details)))
+        self.assertLessEqual(len(details), len(FIXTURES))

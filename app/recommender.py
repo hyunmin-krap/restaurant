@@ -112,6 +112,8 @@ def recommend(
     rng: random.Random | None = None,
     now: datetime | None = None,
     avoid_same_major: bool = True,
+    exclude_details: set[str] | None = None,
+    exclude_majors: set[str] | None = None,
 ) -> list[Pick]:
     """가중 랜덤으로 count 개를 뽑는다. 세부분류는 절대 겹치지 않는다.
 
@@ -132,8 +134,9 @@ def recommend(
     keyed.sort(key=lambda t: t[0], reverse=True)
 
     picks: list[Pick] = []
-    used_details: set[str] = set()
-    used_majors: set[str] = set()
+    # 이미 화면에 떠 있는 카드의 분류를 넘겨받아 그것도 피한다 (카드 한 장만 교체할 때)
+    used_details: set[str] = set(exclude_details or ())
+    used_majors: set[str] = set(exclude_majors or ())
 
     def take(require_major_unique: bool) -> None:
         for _, weight, reasons, c in keyed:
