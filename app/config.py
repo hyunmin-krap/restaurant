@@ -54,6 +54,7 @@ class Config:
     recommend_count: int
     naver_client_id: str
     naver_client_secret: str
+    google_maps_api_key: str
     enable_place_review_scrape: bool
     host: str
     port: int
@@ -62,6 +63,10 @@ class Config:
     @property
     def has_naver_keys(self) -> bool:
         return bool(self.naver_client_id and self.naver_client_secret)
+
+    @property
+    def has_google_key(self) -> bool:
+        return bool(self.google_maps_api_key)
 
 
 def load_config() -> Config:
@@ -76,6 +81,7 @@ def load_config() -> Config:
         recommend_count=_int("RECOMMEND_COUNT", 3),
         naver_client_id=os.environ.get("NAVER_CLIENT_ID", "").strip(),
         naver_client_secret=os.environ.get("NAVER_CLIENT_SECRET", "").strip(),
+        google_maps_api_key=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
         enable_place_review_scrape=_bool("ENABLE_PLACE_REVIEW_SCRAPE", False),
         host=os.environ.get("HOST", "0.0.0.0"),
         port=_int("PORT", 8000),

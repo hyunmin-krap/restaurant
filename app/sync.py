@@ -8,7 +8,9 @@ from typing import Any, Callable
 
 from . import db as dbm
 from .categories import classify
-from .providers import NaverLocalProvider, NaverPlaceReviewProvider, ProviderError
+from .providers import (
+    GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
+)
 
 
 @dataclass
@@ -75,7 +77,8 @@ def sync_places(
 
 def enrich_places(
     conn: sqlite3.Connection,
-    reviewer: NaverPlaceReviewProvider,
+    reviewer: NaverPlaceReviewProvider | None = None,
+    google: GooglePlacesProvider | None = None,
     limit: int = 50,
     state: SyncState | None = None,
     lock: threading.Lock | None = None,
@@ -84,11 +87,15 @@ def enrich_places(
     """'음식이 맛있어요' 비율과 영업시간(점심 영업 여부)을 채운다.
 
     네이버 지도에서 [영업중 · 12시] 필터를 거는 것과 같은 판정을 자동으로 한다.
-    사람이 손으로 표시한 값(lunch_source='manual')은 덮어쓰지 않는다.
+
+    영업시간은 구글 Places(공식 API)를 1순위로 쓰고, 구글 키가 없거나 못 찾으면
+    네이버 플레이스(비공식)로 넘어간다. '맛있어요' 비율은 네이버에만 있다.
+    사람이 손으로 표시한 값(lunch_source='manual')은 어느 쪽도 덮어쓰지 않는다.
     실패한 곳은 조용히 건너뛴다.
     """
     state = state or SyncState()
-    sql = """SELECT id, name, road_address, address, link, naver_place_id
+    sql = """SELECT id, name, road_address, address, link,
+                    naver_place_id, google_place_id, lat, lng
                FROM places WHERE is_active = 1"""
     if only_missing:
         sql += """ AND (
@@ -102,12 +109,32 @@ def enrich_places(
 
     for idx, row in enumerate(rows, start=1):
         state.done = idx
-        info = reviewer.enrich(
-            name=row["name"],
-            address=row["road_address"] or row["address"] or "",
-            link=row["link"] or "",
-            place_id=row["naver_place_id"],
-        )
+        address = row["road_address"] or row["address"] or ""
+        info: dict = {}
+
+        # 1순위: 구글 공식 API 로 영업시간
+        if google is not None:
+            hours = google.fetch_hours(
+                name=row["name"], address=address,
+                lat=row["lat"], lng=row["lng"],
+                google_place_id=row["google_place_id"],
+            )
+            if hours:
+                info["lunch_open"] = hours["lunch_open"]
+                info["business_hours"] = hours["text"]
+                info["google_place_id"] = hours.get("google_place_id")
+
+        # 네이버: '맛있어요' 비율 (+ 구글이 못 찾았으면 영업시간까지)
+        if reviewer is not None:
+            naver_info = reviewer.enrich(
+                name=row["name"], address=address, link=row["link"] or "",
+                place_id=row["naver_place_id"],
+                with_hours="lunch_open" not in info,
+            )
+            if naver_info:
+                for key, value in naver_info.items():
+                    info.setdefault(key, value)
+
         if not info:
             state.message = f"{row['name']} — 정보 없음"
             state.log.append(state.message)
@@ -117,7 +144,8 @@ def enrich_places(
         if info.get("ratio") is not None:
             notes.append(f"맛있어요 {round(info['ratio'] * 100)}%")
         if "lunch_open" in info:
-            notes.append("점심 영업" if info["lunch_open"] else "점심 안 함")
+            source = "구글" if info.get("google_place_id") else "네이버"
+            notes.append(("점심 영업" if info["lunch_open"] else "점심 안 함") + f"({source})")
 
         def write() -> None:
             if info.get("ratio") is not None:
@@ -132,9 +160,15 @@ def enrich_places(
                 ).fetchone()
                 if not current or current["lunch_source"] != "manual":
                     dbm.set_lunch_open(
-                        conn, row["id"], info["lunch_open"], "naver_place",
+                        conn, row["id"], info["lunch_open"],
+                        "google_places" if info.get("google_place_id") else "naver_place",
                         info.get("business_hours"),
                     )
+            if info.get("google_place_id"):
+                conn.execute(
+                    "UPDATE places SET google_place_id = ? WHERE id = ?",
+                    (info["google_place_id"], row["id"]),
+                )
             if info.get("place_id"):
                 conn.execute(
                     "UPDATE places SET naver_place_id = ? WHERE id = ?",

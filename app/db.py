@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS places (
     lunch_open        INTEGER,       -- 1=점심 영업, 0=점심 영업 안 함, NULL=모름
     lunch_source      TEXT,          -- naver_place | manual
     business_hours    TEXT,          -- 영업시간 원문 (있으면 화면에 표시)
+    google_place_id   TEXT,          -- 구글에서 영업시간을 다시 받을 때 쓴다
     source            TEXT,
     is_active         INTEGER NOT NULL DEFAULT 1,
     created_at        TEXT NOT NULL,
@@ -93,6 +94,7 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("places", "lunch_open INTEGER"),
     ("places", "lunch_source TEXT"),
     ("places", "business_hours TEXT"),
+    ("places", "google_place_id TEXT"),
 )
 
 

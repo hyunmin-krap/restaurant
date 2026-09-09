@@ -378,7 +378,7 @@ async function loadConfig() {
   warn.hidden = !notes.length;
   $('#run-sync').disabled = !cfg.has_naver_keys;
   $('#run-import').disabled = !cfg.has_naver_keys;
-  $('#run-enrich').disabled = !cfg.review_scrape_enabled;
+  $('#run-enrich').disabled = !cfg.review_scrape_enabled && !cfg.has_google_key;
 }
 
 // ── 수집 진행 폴링 ─────────────────────────────────────────────────

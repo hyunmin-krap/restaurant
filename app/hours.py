@@ -216,3 +216,69 @@ def summarize(entries: list[dict]) -> str:
         if start and end:
             parts.append(f"{day} {start}-{end}".strip())
     return " · ".join(parts)
+
+
+# ── 구글 Places 영업시간 ────────────────────────────────────────────
+# 구글은 브레이크타임을 별도 필드로 주지 않고, 하루를 여러 구간으로 쪼개서 준다.
+# (11:00~15:00 영업 후 17:00~21:00 재개 = 같은 요일에 구간 2개)
+# 그래서 "그 요일의 구간 중 하나라도 점심을 덮으면 점심 영업"으로 보면 된다.
+GOOGLE_DAYS = {0: "일", 1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토"}
+
+
+def _google_minutes(point: dict) -> int | None:
+    if not isinstance(point, dict) or "hour" not in point:
+        return None
+    hour, minute = point.get("hour"), point.get("minute") or 0
+    if not isinstance(hour, int) or not (0 <= hour <= 24 and 0 <= minute < 60):
+        return None
+    return hour * 60 + minute
+
+
+def from_google_periods(periods: Any, descriptions: Any = None) -> dict[str, Any] | None:
+    """구글 regularOpeningHours.periods -> {'lunch_open': bool, 'text': str}."""
+    if not isinstance(periods, list) or not periods:
+        return None
+
+    by_day: dict[str, bool] = {}
+    spans: dict[str, list[str]] = {}
+    for period in periods:
+        if not isinstance(period, dict):
+            continue
+        opening = period.get("open")
+        day = GOOGLE_DAYS.get((opening or {}).get("day")) if isinstance(opening, dict) else None
+        start = _google_minutes(opening or {})
+        if day is None or start is None:
+            continue
+
+        closing = period.get("close")
+        if not isinstance(closing, dict):
+            # close 가 없으면 24시간 영업
+            by_day[day] = True
+            spans.setdefault(day, []).append("24시간")
+            continue
+        end = _google_minutes(closing)
+        if end is None:
+            continue
+        if closing.get("day") != opening.get("day"):
+            end += 24 * 60                      # 자정을 넘겨 닫는 경우
+        covers = _overlaps_lunch(start, end)
+        by_day[day] = by_day.get(day, False) or covers
+        spans.setdefault(day, []).append(
+            f"{start // 60:02d}:{start % 60:02d}-{end // 60 % 24:02d}:{end % 60:02d}"
+        )
+
+    if not by_day:
+        return None
+
+    weekday_verdicts = [by_day[d] for d in WEEKDAYS if d in by_day]
+    if weekday_verdicts:
+        lunch_open = sum(1 for v in weekday_verdicts if v) * 2 >= len(weekday_verdicts)
+    else:
+        lunch_open = any(by_day.values())
+
+    if isinstance(descriptions, list) and descriptions:
+        text = " · ".join(str(d) for d in descriptions[:7])
+    else:
+        order = list(WEEKDAYS) + ["토", "일"]
+        text = " · ".join(f"{d} {'/'.join(spans[d])}" for d in order if d in spans)
+    return {"lunch_open": lunch_open, "text": text[:300]}

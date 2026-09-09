@@ -14,7 +14,9 @@ from typing import Any, Callable
 from . import db as dbm
 from . import service
 from .config import CONFIG, Config
-from .providers import NaverLocalProvider, NaverPlaceReviewProvider, ProviderError
+from .providers import (
+    GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
+)
 from .sync import SyncState, enrich_places, import_named_places, run_in_thread, sync_places
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -92,6 +94,7 @@ def get_config(h: "LunchHandler", q, body):
         "area_keyword": s.area_keyword,
         "has_naver_keys": s.config.has_naver_keys,
         "review_scrape_enabled": s.config.enable_place_review_scrape,
+        "has_google_key": s.config.has_google_key,
     }
 
 
@@ -304,22 +307,27 @@ def post_import(h: "LunchHandler", q, body):
 @route("POST", "/api/enrich")
 def post_enrich(h: "LunchHandler", q, body):
     s = h.state
-    if not s.config.enable_place_review_scrape:
+    if not s.config.enable_place_review_scrape and not s.config.has_google_key:
         raise ApiError(
             400,
-            "리뷰·영업시간 수집이 꺼져 있습니다. .env 에서 ENABLE_PLACE_REVIEW_SCRAPE=1 로 켜세요. "
-            "(네이버 공식 API 가 아니라 언제든 막힐 수 있습니다.)",
+            "채울 소스가 없습니다. .env 에 GOOGLE_MAPS_API_KEY 를 넣으면 영업시간을 공식 API 로 "
+            "가져옵니다. '맛있어요' 비율까지 원하면 ENABLE_PLACE_REVIEW_SCRAPE=1 도 켜세요 "
+            "(이쪽은 비공식 경로라 언제든 막힐 수 있습니다).",
         )
     if s.sync_state.running:
         raise ApiError(409, "이미 작업이 진행 중입니다.")
     limit = int(body.get("limit") or 50)
+    reviewer = NaverPlaceReviewProvider() if s.config.enable_place_review_scrape else None
+    google = GooglePlacesProvider(s.config.google_maps_api_key) if s.config.has_google_key else None
     s.sync_state = SyncState()
     run_in_thread(
-        partial(enrich_places, s.conn, NaverPlaceReviewProvider(), limit,
+        partial(enrich_places, s.conn, reviewer, google, limit,
                 state=s.sync_state, lock=s.lock),
         s.sync_state,
     )
-    return {"started": True, "limit": limit}
+    return {"started": True, "limit": limit,
+            "hours_source": "google" if google else "naver",
+            "taste": bool(reviewer)}
 
 
 # ── 유틸 ────────────────────────────────────────────────────────────

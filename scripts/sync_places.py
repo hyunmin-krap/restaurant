@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import db as dbm  # noqa: E402
 from app.config import CONFIG  # noqa: E402
-from app.providers import NaverLocalProvider, NaverPlaceReviewProvider, ProviderError  # noqa: E402
+from app.providers import (  # noqa: E402
+    GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
+)
 from app.sync import SyncState, enrich_places, sync_places  # noqa: E402
 
 
@@ -34,12 +36,17 @@ def main() -> int:
     state = SyncState()
 
     if args.enrich:
-        if not CONFIG.enable_place_review_scrape:
-            print("ENABLE_PLACE_REVIEW_SCRAPE=1 로 켜야 실행됩니다.")
-            print("(네이버 공식 API 가 아니라 언제든 막힐 수 있는 비공식 경로입니다.)")
+        google = GooglePlacesProvider(CONFIG.google_maps_api_key) if CONFIG.has_google_key else None
+        reviewer = NaverPlaceReviewProvider() if CONFIG.enable_place_review_scrape else None
+        if google is None and reviewer is None:
+            print("채울 소스가 없습니다.")
+            print("  · 영업시간(권장): .env 에 GOOGLE_MAPS_API_KEY 를 넣으세요. 구글 공식 API 입니다.")
+            print("  · '맛있어요' 비율: ENABLE_PLACE_REVIEW_SCRAPE=1 (비공식 경로, 막힐 수 있음)")
             return 1
+        print("영업시간 소스:", "구글 Places (공식)" if google else "네이버 플레이스 (비공식)")
+        print("맛있어요 비율:", "네이버 플레이스" if reviewer else "안 함")
         filled = enrich_places(
-            conn, NaverPlaceReviewProvider(), limit=args.limit,
+            conn, reviewer, google, limit=args.limit,
             state=state, only_missing=not args.refresh,
         )
         for line in state.log:
