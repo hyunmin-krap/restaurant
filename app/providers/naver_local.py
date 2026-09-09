@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import time
 import urllib.parse
-from typing import Iterator
+from typing import Callable, Iterator
 
 from ..categories import is_restaurant
 from ..geo import haversine_m, parse_naver_coords
-from .base import Place, ProviderError, http_json, strip_tags
+from .base import BudgetExhausted, Place, ProviderError, http_json, strip_tags
 
 ENDPOINT = "https://openapi.naver.com/v1/search/local.json"
 
@@ -36,15 +36,25 @@ FOOD_KEYWORDS: tuple[str, ...] = (
 
 
 class NaverLocalProvider:
-    def __init__(self, client_id: str, client_secret: str, request_delay: float = 0.12) -> None:
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        request_delay: float = 0.12,
+        guard: Callable[[], None] | None = None,
+    ) -> None:
         if not client_id or not client_secret:
             raise ProviderError(
                 "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없습니다. "
-                "https://developers.naver.com/apps 에서 '검색' API 를 신청하세요."
+                "네이버 클라우드 NAVER API HUB 에서 'NAVER 검색 > 지역' API 키를 받아 넣으세요. "
+                "(개발자센터는 2026-07-31 부로 검색 API 신규 발급이 끝났습니다)"
             )
         self.client_id = client_id
         self.client_secret = client_secret
         self.request_delay = request_delay
+        # 호출 직전마다 불린다. 한도를 넘었으면 BudgetExhausted 를 올려 막는다.
+        # search() 한 곳만 통과하면 되므로 어느 경로로 들어와도 빠짐없이 세어진다.
+        self.guard = guard
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -54,6 +64,8 @@ class NaverLocalProvider:
         }
 
     def search(self, query: str, display: int = 5) -> list[dict]:
+        if self.guard is not None:
+            self.guard()
         params = urllib.parse.urlencode(
             {"query": query, "display": max(1, min(5, display)), "start": 1, "sort": "random"}
         )
@@ -105,6 +117,8 @@ class NaverLocalProvider:
             query = f"{area_keyword} {keyword}".strip()
             try:
                 items = self.search(query)
+            except BudgetExhausted:
+                raise                      # 남은 키워드를 더 돌아 봐야 소용없다
             except ProviderError as exc:
                 if on_progress:
                     on_progress(idx, len(keywords), query, f"실패: {exc}")

@@ -224,6 +224,13 @@ class ImportPreviewTestCase(ServerTestCase):
         self.assertEqual(reasons["투썸플레이스 마포대로점"], "카페·주점")
         self.assertEqual(reasons["마키노차야 마포점"], "비싼 편")
 
+    def test_config_exposes_naver_budget_only_with_keys(self):
+        status, cfg = request(f"{self.base}/api/config")
+        self.assertEqual(status, 200)
+        self.assertIn("naver_budget", cfg)
+        # 이 테스트 환경엔 키가 없으므로 사용량도 없다
+        self.assertIsNone(cfg["naver_budget"])
+
     def test_preview_filters_can_be_turned_off(self):
         pc = "https://pcmap.place.naver.com/restaurant/list?query=x#"
         text = f"* [투썸플레이스 마포대로점배달카페]({pc})"

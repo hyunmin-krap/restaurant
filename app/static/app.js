@@ -300,6 +300,21 @@ function placeRow(p) {
     }, p.blocked ? '되돌리기' : '제외'));
 }
 
+
+// 이 앱이 스스로 걸어 둔 호출 한도. 콘솔 한도와 별개로 여기서 한 번 더 막는다.
+function renderBudget(sel, b, label) {
+  const el_ = $(sel);
+  if (!b) { el_.hidden = true; return; }
+  const daily = b.daily_limit
+    ? ` · 오늘 ${b.used_today.toLocaleString()}/${b.daily_limit.toLocaleString()}건`
+    : '';
+  el_.textContent =
+    `${label} 호출 ${b.month} — ${b.used.toLocaleString()}/${b.limit.toLocaleString()}건${daily}`
+    + (b.exhausted ? ' · 한도를 다 써서 호출을 멈춘 상태입니다' : '');
+  el_.classList.toggle('warn', !!b.exhausted);
+  el_.hidden = false;
+}
+
 function renderPlaces() {
   const q = $('#place-search').value.trim().toLowerCase();
   const showBlocked = $('#show-blocked').checked;
@@ -376,6 +391,8 @@ async function loadConfig() {
   if (!cfg.review_scrape_enabled) notes.push("'맛있어요' 비율 수집이 꺼져 있습니다 (.env 의 ENABLE_PLACE_REVIEW_SCRAPE=1). 공식 API 가 아니라 언제든 막힐 수 있습니다.");
   warn.textContent = notes.join('\n');
   warn.hidden = !notes.length;
+  renderBudget('#naver-budget', cfg.naver_budget, '네이버');
+  renderBudget('#google-budget', cfg.google_budget, '구글');
   $('#run-sync').disabled = !cfg.has_naver_keys;
   // 붙여넣기 등록은 키가 없어도 된다 (좌표 없이 상호명·업종만 등록). 미리보기가 켜 준다.
   $('#run-enrich').disabled = !cfg.review_scrape_enabled && !cfg.has_google_key;

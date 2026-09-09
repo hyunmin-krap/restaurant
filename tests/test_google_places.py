@@ -127,35 +127,35 @@ class TestCallBudget(unittest.TestCase):
 
     def test_starts_empty(self):
         from app import budget
-        self.assertEqual(budget.used(self.conn), 0)
-        self.assertEqual(budget.remaining(self.conn, 900), 900)
+        self.assertEqual(budget.used(self.conn, "google"), 0)
+        self.assertEqual(budget.remaining(self.conn, "google", 900), 900)
 
     def test_consume_accumulates(self):
         from app import budget
-        budget.consume(self.conn, 10)
-        budget.consume(self.conn, 5)
-        self.assertEqual(budget.used(self.conn), 15)
-        self.assertEqual(budget.remaining(self.conn, 900), 885)
+        budget.consume(self.conn, "google", 10)
+        budget.consume(self.conn, "google", 5)
+        self.assertEqual(budget.used(self.conn, "google"), 15)
+        self.assertEqual(budget.remaining(self.conn, "google", 900), 885)
 
     def test_remaining_never_negative(self):
         from app import budget
-        budget.consume(self.conn, 5000)
-        self.assertEqual(budget.remaining(self.conn, 900), 0)
-        self.assertTrue(budget.status(self.conn, 900)["exhausted"])
+        budget.consume(self.conn, "google", 5000)
+        self.assertEqual(budget.remaining(self.conn, "google", 900), 0)
+        self.assertTrue(budget.status(self.conn, "google", 900)["exhausted"])
 
     def test_counter_is_per_month(self):
         from datetime import datetime, timezone
         from app import budget
         sept = datetime(2026, 9, 15, tzinfo=timezone.utc)
         octo = datetime(2026, 10, 2, tzinfo=timezone.utc)
-        budget.consume(self.conn, 700, now=sept)
-        self.assertEqual(budget.used(self.conn, now=sept), 700)
-        self.assertEqual(budget.used(self.conn, now=octo), 0)   # 달이 바뀌면 초기화
+        budget.consume(self.conn, "google", 700, now=sept)
+        self.assertEqual(budget.used(self.conn, "google", now=sept), 700)
+        self.assertEqual(budget.used(self.conn, "google", now=octo), 0)   # 달이 바뀌면 초기화
 
     def test_corrupt_counter_is_treated_as_zero(self):
         from app import budget, db as dbm
-        dbm.set_setting(self.conn, budget.month_key(), "이상한값")
-        self.assertEqual(budget.used(self.conn), 0)
+        dbm.set_setting(self.conn, budget.month_key("google"), "이상한값")
+        self.assertEqual(budget.used(self.conn, "google"), 0)
 
 
 class FakeGoogle:
@@ -199,7 +199,7 @@ class TestBudgetStopsCalls(unittest.TestCase):
         google = FakeGoogle()
         enrich_places(self.conn, reviewer=None, google=google, limit=10, google_call_limit=3)
         self.assertEqual(google.calls, 3, "한도를 넘겨 호출했다")
-        self.assertEqual(budget.used(self.conn), 3)
+        self.assertEqual(budget.used(self.conn, "google"), 3)
 
     def test_counts_every_call(self):
         from app import budget
@@ -207,7 +207,7 @@ class TestBudgetStopsCalls(unittest.TestCase):
         google = FakeGoogle()
         enrich_places(self.conn, reviewer=None, google=google, limit=10, google_call_limit=900)
         self.assertEqual(google.calls, 6)
-        self.assertEqual(budget.used(self.conn), 6)
+        self.assertEqual(budget.used(self.conn, "google"), 6)
 
     def test_writes_hours_and_google_id(self):
         from app.sync import enrich_places

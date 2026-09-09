@@ -17,6 +17,7 @@ from . import service
 from .paste import extract_entries
 from .config import CONFIG, Config
 from .providers import (
+    BudgetExhausted,
     GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
 )
 from .sync import SyncState, enrich_places, import_named_places, run_in_thread, sync_places
@@ -97,8 +98,12 @@ def get_config(h: "LunchHandler", q, body):
         "has_naver_keys": s.config.has_naver_keys,
         "review_scrape_enabled": s.config.enable_place_review_scrape,
         "has_google_key": s.config.has_google_key,
-        "google_budget": (budget_mod.status(s.conn, s.config.google_monthly_call_limit)
+        "google_budget": (budget_mod.status(s.conn, "google", s.config.google_monthly_call_limit)
                           if s.config.has_google_key else None),
+        "naver_budget": (budget_mod.status(
+            s.conn, "naver",
+            s.config.naver_monthly_call_limit, s.config.naver_daily_call_limit,
+        ) if s.config.has_naver_keys else None),
     }
 
 
@@ -269,7 +274,7 @@ def post_sync(h: "LunchHandler", q, body):
     dbm.set_setting(s.conn, "area_keyword", area)
     radius = int(body.get("radius") or s.radius_m)
     try:
-        provider = NaverLocalProvider(s.config.naver_client_id, s.config.naver_client_secret)
+        provider = _naver_provider(s)
     except ProviderError as exc:
         raise ApiError(400, str(exc)) from exc
     lat, lng = s.office
@@ -299,7 +304,7 @@ def post_import(h: "LunchHandler", q, body):
     # 키가 있으면 좌표·거리까지 채우고, 없으면 상호명·업종만으로 등록한다.
     # (네이버 검색 API 신규 발급이 개발자센터에서 막혀 키가 없는 경우가 많다)
     try:
-        provider = NaverLocalProvider(s.config.naver_client_id, s.config.naver_client_secret)
+        provider = _naver_provider(s)
     except ProviderError:
         provider = None
 
@@ -359,7 +364,35 @@ def post_enrich(h: "LunchHandler", q, body):
     return {"started": True, "limit": limit,
             "hours_source": "google" if google else "naver",
             "taste": bool(reviewer),
-            "google_budget": budget_mod.status(s.conn, s.config.google_monthly_call_limit)}
+            "google_budget": budget_mod.status(s.conn, "google", s.config.google_monthly_call_limit)}
+
+
+def _naver_provider(s: "AppState") -> NaverLocalProvider:
+    """호출 한도 가드를 물린 네이버 프로바이더.
+
+    가드는 search() 직전마다 불린다. 한도가 남아 있으면 1건을 먼저 적어 두고
+    통과시킨다. (실패한 호출도 네이버 쪽에서는 한 번 센 것으로 잡히므로
+    성공했을 때만 세면 실제보다 적게 잡힌다.)
+    """
+    def guard() -> None:
+        left = budget_mod.remaining(
+            s.conn, "naver",
+            s.config.naver_monthly_call_limit, s.config.naver_daily_call_limit,
+        )
+        if left <= 0:
+            raise BudgetExhausted(
+                f"이 앱에 걸어 둔 네이버 호출 한도를 다 썼습니다 "
+                f"(월 {s.config.naver_monthly_call_limit:,}건 / 일 "
+                f"{s.config.naver_daily_call_limit:,}건). "
+                ".env 의 NAVER_MONTHLY_CALL_LIMIT · NAVER_DAILY_CALL_LIMIT 을 올리거나 "
+                "내일 다시 시도하세요. 붙여넣기 등록은 한도와 무관하게 계속 됩니다."
+            )
+        with s.lock:
+            budget_mod.consume(s.conn, "naver", 1)
+
+    return NaverLocalProvider(
+        s.config.naver_client_id, s.config.naver_client_secret, guard=guard
+    )
 
 
 # ── 유틸 ────────────────────────────────────────────────────────────

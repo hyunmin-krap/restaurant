@@ -116,7 +116,7 @@ def enrich_places(
         info: dict = {}
 
         # 1순위: 구글 공식 API 로 영업시간 (이번 달 호출 한도 안에서만)
-        if google is not None and budget_mod.remaining(conn, google_call_limit) <= 0:
+        if google is not None and budget_mod.remaining(conn, "google", google_call_limit) <= 0:
             if not budget_warned:
                 budget_warned = True
                 state.log.append(
@@ -125,7 +125,7 @@ def enrich_places(
                 )
             google = None
         if google is not None:
-            budget_mod.consume(conn, 1)
+            budget_mod.consume(conn, "google", 1)
             hours = google.fetch_hours(
                 name=row["name"], address=address,
                 lat=row["lat"], lng=row["lng"],

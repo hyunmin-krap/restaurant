@@ -56,6 +56,8 @@ class Config:
     naver_client_secret: str
     google_maps_api_key: str
     google_monthly_call_limit: int
+    naver_monthly_call_limit: int
+    naver_daily_call_limit: int
     enable_place_review_scrape: bool
     host: str
     port: int
@@ -84,6 +86,10 @@ def load_config() -> Config:
         naver_client_secret=os.environ.get("NAVER_CLIENT_SECRET", "").strip(),
         google_maps_api_key=os.environ.get("GOOGLE_MAPS_API_KEY", "").strip(),
         google_monthly_call_limit=_int("GOOGLE_MONTHLY_CALL_LIMIT", 900),
+        # API HUB 무료 한도는 월 775,000 / 일 25,000 건. 이 앱은 버튼 한 번에 최대 76건
+        # 쓰므로 한참 밑이다. 사고로 폭주하는 경우만 막으려고 여유 있게 잡았다.
+        naver_monthly_call_limit=_int("NAVER_MONTHLY_CALL_LIMIT", 5000),
+        naver_daily_call_limit=_int("NAVER_DAILY_CALL_LIMIT", 1000),
         enable_place_review_scrape=_bool("ENABLE_PLACE_REVIEW_SCRAPE", False),
         host=os.environ.get("HOST", "0.0.0.0"),
         port=_int("PORT", 8000),

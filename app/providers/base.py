@@ -21,6 +21,10 @@ class ProviderError(RuntimeError):
     """외부 소스 호출 실패."""
 
 
+class BudgetExhausted(ProviderError):
+    """앱이 정한 호출 한도를 다 썼다. 재시도해도 소용없으니 바로 멈춘다."""
+
+
 @dataclass
 class Place:
     """수집한 식당 하나."""
