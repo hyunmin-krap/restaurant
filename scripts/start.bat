@@ -1,26 +1,56 @@
 @echo off
-REM 윈도우에서 더블클릭으로 실행하는 시작 파일.
-chcp 65001 >nul
+REM ---------------------------------------------------------------
+REM  Lunch picker - Windows start file. Just double-click this.
+REM  (Messages here are ASCII on purpose: a .bat file saved as UTF-8
+REM   shows garbled text in the Korean Windows console.)
+REM ---------------------------------------------------------------
+setlocal
 cd /d "%~dp0.."
 
-where py >nul 2>&1 && (set PY=py) || (
-  where python >nul 2>&1 && (set PY=python) || (
-    echo.
-    echo  [X] 파이썬이 없습니다.
-    echo      https://www.python.org/downloads/ 에서 받아 설치하세요.
-    echo      설치할 때 "Add Python to PATH" 를 꼭 체크하세요.
-    echo.
-    pause
-    exit /b 1
-  )
+if "%PORT%"=="" set PORT=8000
+set PY=
+
+REM  'py' is the Python launcher and only exists with a real install.
+REM  Try it first: bare 'python' on Windows may be the Microsoft Store
+REM  stub, which opens the Store instead of running anything.
+where py >nul 2>&1 && set PY=py
+if not defined PY (
+  where python >nul 2>&1 && set PY=python
 )
+
+if not defined PY goto :nopython
+
+REM  Make sure it really runs (catches the Store stub).
+%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+if errorlevel 1 goto :nopython
 
 if not exist .env copy .env.example .env >nul
 
-if "%PORT%"=="" set PORT=8000
 echo.
-echo  [*] 잠시 후 브라우저가 열립니다. 이 창은 켜 두세요 (닫으면 앱이 꺼집니다).
+echo   Lunch picker is starting.
 echo.
-start "" /b cmd /c "timeout /t 2 >nul & start http://localhost:%PORT%"
+echo   Open this in your browser:   http://localhost:%PORT%
+echo.
+echo   KEEP THIS WINDOW OPEN. Closing it stops the app.
+echo   Press Ctrl+C to stop.
+echo.
+
+start "" /b powershell -NoProfile -Command "Start-Sleep -Seconds 3; Start-Process 'http://localhost:%PORT%'" >nul 2>&1
+
 %PY% -m app
+echo.
+echo   The app has stopped.
 pause
+exit /b 0
+
+:nopython
+echo.
+echo   [X] Python 3.10 or newer was not found.
+echo.
+echo       1. Go to  https://www.python.org/downloads/
+echo       2. Download and run the installer
+echo       3. IMPORTANT: tick "Add python.exe to PATH" on the first screen
+echo       4. Then double-click this file again
+echo.
+pause
+exit /b 1
