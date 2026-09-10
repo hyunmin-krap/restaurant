@@ -287,8 +287,11 @@ async function loadHistory() {
 
 function placeRow(p) {
   const taste = pct(p.taste_ratio);
-  return el('div', { class: `place-row${p.blocked || p.lunch_open === 0 ? ' blocked' : ''}` },
-    el('span', { class: 'dot', style: `--cat:${catColor(p.major_category)}` }),
+  return el('div', {
+      class: `place-row${p.blocked || p.lunch_open === 0 ? ' blocked' : ''}`,
+      // 분류 색은 왼쪽 띠로 보여 준다. 점을 쓰면 글씨가 그만큼 안쪽으로 밀린다.
+      style: `--cat:${catColor(p.major_category)}`,
+    },
     el('span', { class: 'grow' },
       el('div', {}, el('a', { href: p.map_url, target: '_blank', rel: 'noopener', style: 'color:inherit' }, p.name),
         ' ', el('span', { class: 'muted' }, `${p.major_category}${p.detail_category && p.detail_category !== p.major_category ? ' · ' + p.detail_category : ''}`)),

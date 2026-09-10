@@ -196,15 +196,14 @@ a.btn:hover { border-color: var(--accent); color: var(--accent); }
 .place-row {
   display: flex; align-items: center; gap: 11px; padding: 11px 14px;
   background: var(--surface); border: 1px solid var(--border);
+  /* 분류 색을 왼쪽 띠로 낸다. 점으로 두면 상호명이 그만큼 안쪽으로 밀려
+     페이지의 다른 요소들보다 오른쪽에서 시작하는 것처럼 보인다. */
+  border-left: 4px solid var(--cat, var(--border));
   border-radius: 12px; font-size: .9rem; box-shadow: var(--shadow-sm);
 }
 .place-row.blocked { opacity: .45; }
 .place-row .grow { flex: 1; min-width: 0; }
 .place-row .grow div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.place-row .dot {
-  width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
-  background: var(--cat, var(--muted));
-}
 
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
