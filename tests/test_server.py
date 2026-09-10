@@ -402,6 +402,25 @@ class SearchQueryTestCase(unittest.TestCase):
         place = {"name": "어떤집", "road_address": "서울 마포구 백범로 1길 60", "address": ""}
         self.assertEqual(_search_query(place), "어떤집 마포구")
 
+    def test_서울특별시_같은_넓은_지역은_안_붙인다(self):
+        from app.service import _search_query
+        place = {"name": "한가네숯불닭갈비 공덕점", "address": "",
+                 "road_address": "서울특별시 마포구 마포대로6길 10 1층 7호, 30호"}
+        # '서울특별시' 를 붙여 봐야 검색이 좁혀지지 않는다. 구까지 내려간다.
+        self.assertEqual(_search_query(place), "한가네숯불닭갈비 공덕점 마포구")
+
+    def test_좁은_것부터_고른다(self):
+        from app.service import _search_query
+        place = {"name": "어떤집", "road_address": "경기도 성남시 분당구 판교로 100",
+                 "address": "경기 성남시 분당구 삼평동 620"}
+        self.assertEqual(_search_query(place), "어떤집 삼평동")
+
+    def test_종로1가처럼_숫자가_섞여도_잡는다(self):
+        from app.service import _search_query
+        place = {"name": "종로집", "road_address": "서울특별시 종로구 종로 1",
+                 "address": "서울 종로구 종로1가 24"}
+        self.assertEqual(_search_query(place), "종로집 종로1가")
+
     def test_상호명에_이미_동이_있으면_또_붙이지_않는다(self):
         from app.service import _search_query
         place = {"name": "공덕동 할머니 빈대떡", "road_address": "",

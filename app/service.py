@@ -32,19 +32,25 @@ SELECT p.*,
 # 지번주소에서 동 이름만 집어낸다. '서울 마포구 도화동 25-1' -> '도화동'
 # 'A동 2F' 처럼 건물 동·층은 한글로 시작하지 않아서 걸리지 않는다.
 _DONG = re.compile(r"[가-힣]{2,}\d*(?:동|가|읍|면|리)(?=\s|$)")
-_GU = re.compile(r"[가-힣]{2,}(?:구|군|시)(?=\s|$)")
+_GU = re.compile(r"[가-힣]{2,}(?:구|군)(?=\s|$)")
+_SI = re.compile(r"[가-힣]{2,}시(?=\s|$)")
+
+# 검색어를 좁히는 데 도움이 안 되는 넓은 지역. '서울특별시' 를 붙여 봐야 소용없다.
+_TOO_WIDE = ("특별시", "광역시", "특별자치시", "특별자치도")
 
 
 def _locality(place: dict[str, Any]) -> str:
-    """상호명에 붙일 짧은 지역명. 없으면 빈 문자열."""
+    """상호명에 붙일 짧은 지역명. 좁은 것부터 고른다. 없으면 빈 문자열."""
     # 지번주소를 먼저 본다. 도로명주소에는 건물 이름·층이 붙어 있어 검색을 망친다.
-    for field in ("address", "road_address"):
-        text = (place.get(field) or "").strip()
-        if not text:
-            continue
-        found = _DONG.search(text) or _GU.search(text)
-        if found:
-            return found.group(0)
+    texts = [(place.get(f) or "").strip() for f in ("address", "road_address")]
+    for pattern in (_DONG, _GU, _SI):
+        for text in texts:
+            if not text:
+                continue
+            for found in pattern.finditer(text):
+                word = found.group(0)
+                if not word.endswith(_TOO_WIDE):
+                    return word
     return ""
 
 
