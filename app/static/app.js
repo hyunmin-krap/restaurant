@@ -398,6 +398,11 @@ async function loadConfig() {
       : '키가 저장되어 있습니다.';
   }
   renderBudget('#naver-budget', cfg.naver_budget, '네이버');
+  $('#naver-limit-row').hidden = !cfg.naver_budget;
+  if (cfg.naver_budget) {
+    $('#cfg-naver-month').value = cfg.naver_monthly_call_limit;
+    $('#cfg-naver-day').value = cfg.naver_daily_call_limit;
+  }
   renderBudget('#google-budget', cfg.google_budget, '구글');
   $('#run-sync').disabled = !cfg.has_naver_keys;
   // 붙여넣기 등록은 키가 없어도 된다 (좌표 없이 상호명·업종만 등록). 미리보기가 켜 준다.
@@ -471,6 +476,20 @@ function initEvents() {
     try {
       await api('/api/enrich', { method: 'POST', body: { limit: 60 } });
       pollSync();
+    } catch (e) { alert(e.message); }
+  });
+
+  $('#save-naver-limit').addEventListener('click', async () => {
+    try {
+      await api('/api/config', {
+        method: 'POST',
+        body: {
+          naver_monthly_call_limit: Number($('#cfg-naver-month').value) || 0,
+          naver_daily_call_limit: Number($('#cfg-naver-day').value) || 0,
+        },
+      });
+      await loadConfig();
+      $('#naver-limit-msg').textContent = '저장했습니다.';
     } catch (e) { alert(e.message); }
   });
 

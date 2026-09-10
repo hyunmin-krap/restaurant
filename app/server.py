@@ -78,6 +78,18 @@ class AppState:
     def has_naver_keys(self) -> bool:
         return bool(self.naver_client_id and self.naver_client_secret)
 
+    # 호출 상한은 앱이 스스로 지키는 값이라 언제든 조절할 수 있어야 한다.
+    # (네이버 쪽 무료 한도는 월 775,000 / 일 25,000 건으로 훨씬 넉넉하다)
+    @property
+    def naver_monthly_call_limit(self) -> int:
+        return self.setting_int(
+            "naver_monthly_call_limit", self.config.naver_monthly_call_limit)
+
+    @property
+    def naver_daily_call_limit(self) -> int:
+        return self.setting_int(
+            "naver_daily_call_limit", self.config.naver_daily_call_limit)
+
 
 class ApiError(Exception):
     def __init__(self, status: int, message: str) -> None:
@@ -118,15 +130,18 @@ def get_config(h: "LunchHandler", q, body):
                           if s.config.has_google_key else None),
         "naver_budget": (budget_mod.status(
             s.conn, "naver",
-            s.config.naver_monthly_call_limit, s.config.naver_daily_call_limit,
+            s.naver_monthly_call_limit, s.naver_daily_call_limit,
         ) if s.has_naver_keys else None),
+        "naver_monthly_call_limit": s.naver_monthly_call_limit,
+        "naver_daily_call_limit": s.naver_daily_call_limit,
     }
 
 
 @route("POST", "/api/config")
 def post_config(h: "LunchHandler", q, body):
     allowed = {"office_name", "office_lat", "office_lng", "radius_m",
-               "recommend_count", "area_keyword"}
+               "recommend_count", "area_keyword",
+               "naver_monthly_call_limit", "naver_daily_call_limit"}
     secrets = {"naver_client_id", "naver_client_secret"}
     for key, value in body.items():
         if key in allowed and value not in (None, ""):
@@ -417,16 +432,15 @@ def _naver_provider(s: "AppState") -> NaverLocalProvider:
     """
     def guard() -> None:
         left = budget_mod.remaining(
-            s.conn, "naver",
-            s.config.naver_monthly_call_limit, s.config.naver_daily_call_limit,
+            s.conn, "naver", s.naver_monthly_call_limit, s.naver_daily_call_limit,
         )
         if left <= 0:
             raise BudgetExhausted(
                 f"이 앱에 걸어 둔 네이버 호출 한도를 다 썼습니다 "
-                f"(월 {s.config.naver_monthly_call_limit:,}건 / 일 "
-                f"{s.config.naver_daily_call_limit:,}건). "
-                ".env 의 NAVER_MONTHLY_CALL_LIMIT · NAVER_DAILY_CALL_LIMIT 을 올리거나 "
-                "내일 다시 시도하세요. 붙여넣기 등록은 한도와 무관하게 계속 됩니다."
+                f"(월 {s.naver_monthly_call_limit:,}건 / 일 "
+                f"{s.naver_daily_call_limit:,}건). "
+                "설정 탭의 '호출 상한' 을 올리면 바로 다시 쓸 수 있습니다. "
+                "네이버 쪽 무료 한도는 월 775,000 / 일 25,000 건이라 훨씬 넉넉합니다."
             )
         with s.lock:
             budget_mod.consume(s.conn, "naver", 1)

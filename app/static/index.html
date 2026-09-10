@@ -97,6 +97,16 @@
         <p class="muted" id="sync-msg"></p>
       </div>
       <p class="muted" id="naver-budget" hidden></p>
+      <div class="row" id="naver-limit-row" style="gap:10px;align-items:flex-end" hidden>
+        <label style="margin:0">이 앱의 호출 상한 · 월
+          <input id="cfg-naver-month" type="number" min="0" step="100" style="width:110px">
+        </label>
+        <label style="margin:0">일
+          <input id="cfg-naver-day" type="number" min="0" step="100" style="width:110px">
+        </label>
+        <button id="save-naver-limit" class="ghost">상한 저장</button>
+        <span class="muted" id="naver-limit-msg"></span>
+      </div>
       <p class="muted" id="google-budget" hidden></p>
       <p class="warn" id="sync-warn" hidden></p>
     </div>

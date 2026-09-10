@@ -349,3 +349,37 @@ class PasteLimitTestCase(ServerTestCase):
         _, data = request(f"{self.base}/api/import/preview", "POST", {"text": text})
         self.assertEqual(data["count"], 500)
         self.assertEqual(data["truncated"], 0)
+
+
+class CallLimitSettingTestCase(ServerTestCase):
+    """호출 상한은 앱이 스스로 지키는 값이라 화면에서 조절할 수 있어야 한다."""
+
+    def setUp(self):
+        request(f"{self.base}/api/config", "POST",
+                {"naver_client_id": "abc", "naver_client_secret": "xyz"})
+
+    def tearDown(self):
+        for key in ("naver_client_id", "naver_client_secret",
+                    "naver_monthly_call_limit", "naver_daily_call_limit"):
+            self.state.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        self.state.conn.commit()
+
+    def test_상한을_올리면_바로_반영된다(self):
+        _, cfg = request(f"{self.base}/api/config", "POST",
+                         {"naver_daily_call_limit": 3000})
+        self.assertEqual(cfg["naver_daily_call_limit"], 3000)
+        self.assertEqual(cfg["naver_budget"]["daily_limit"], 3000)
+
+    def test_상한을_올리면_다_쓴_상태가_풀린다(self):
+        from app import budget
+        budget.consume(self.state.conn, "naver", 1000)
+        _, cfg = request(f"{self.base}/api/config", "POST",
+                         {"naver_daily_call_limit": 1000})
+        self.assertTrue(cfg["naver_budget"]["exhausted"])
+        _, cfg = request(f"{self.base}/api/config", "POST",
+                         {"naver_daily_call_limit": 5000})
+        self.assertFalse(cfg["naver_budget"]["exhausted"])
+        self.assertEqual(cfg["naver_budget"]["remaining"], 4000)
+        self.state.conn.execute(
+            "DELETE FROM settings WHERE key LIKE 'naver_calls_%'")
+        self.state.conn.commit()
