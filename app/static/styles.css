@@ -279,3 +279,12 @@ a.btn:hover { border-color: var(--accent); color: var(--accent); }
   cursor: pointer;
 }
 .ghost:hover { color: var(--text); border-color: var(--muted); }
+
+
+/* 앱(서버)이 꺼졌을 때 맨 위에 붙는 띠. 저장이 조용히 실패하는 것보다 낫다. */
+.offline {
+  position: sticky; top: 0; z-index: 50;
+  background: #b3261e; color: #fff;
+  padding: 11px 16px; text-align: center; font-size: .93rem;
+}
+.offline b { font-weight: 700; }

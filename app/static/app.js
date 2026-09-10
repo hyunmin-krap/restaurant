@@ -6,12 +6,30 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const state = { config: null, places: [], rating: { placeId: null, stars: 0 }, current: [] };
 
 // ── API ────────────────────────────────────────────────────────────
+// 앱은 검은 창에서 돌아가는 서버다. 창을 닫으면 이 화면은 껍데기만 남는다.
+// 그걸 모르면 '저장이 안 된다' 로만 보이므로, 연결이 끊기면 크게 알려 준다.
+const OFFLINE_MSG =
+  '앱이 꺼져 있습니다. 검은 창(start.bat)을 다시 켜고 이 화면을 새로고침(F5)하세요.';
+
+function setOffline(off) {
+  const bar = document.getElementById('offline-banner');
+  if (bar) bar.hidden = !off;
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch (e) {
+    // 서버가 없으면 fetch 자체가 실패한다 (HTTP 오류가 아니라 예외).
+    setOffline(true);
+    throw new Error(OFFLINE_MSG);
+  }
+  setOffline(false);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
   return data;
@@ -456,17 +474,23 @@ function initEvents() {
   });
 
   $('#cfg-save').addEventListener('click', async () => {
-    await api('/api/config', {
-      method: 'POST',
-      body: {
-        office_name: $('#cfg-office-name').value, area_keyword: $('#cfg-area').value,
-        office_lat: $('#cfg-lat').value, office_lng: $('#cfg-lng').value,
-        radius_m: $('#cfg-radius').value, recommend_count: $('#cfg-count').value,
-      },
-    });
-    $('#cfg-saved').textContent = '저장했습니다';
-    setTimeout(() => { $('#cfg-saved').textContent = ''; }, 2000);
-    await loadConfig();
+    try {
+      await api('/api/config', {
+        method: 'POST',
+        body: {
+          office_name: $('#cfg-office-name').value, area_keyword: $('#cfg-area').value,
+          office_lat: $('#cfg-lat').value, office_lng: $('#cfg-lng').value,
+          radius_m: $('#cfg-radius').value, recommend_count: $('#cfg-count').value,
+        },
+      });
+      $('#cfg-saved').textContent = '저장했습니다';
+      setTimeout(() => { $('#cfg-saved').textContent = ''; }, 2000);
+      await loadConfig();
+    } catch (e) {
+      // 아무 말 없이 실패하면 '저장이 안 된다' 로만 보인다.
+      $('#cfg-saved').textContent = e.message;
+      alert(e.message);
+    }
   });
 
   $('#run-sync').addEventListener('click', async () => {
@@ -677,3 +701,9 @@ function initEvents() {
 initTabs();
 initEvents();
 loadConfig().catch((e) => { $('#pick-note').textContent = e.message; });
+
+
+// 다른 창을 보다 돌아왔을 때, 그 사이 앱이 꺼졌는지 확인한다.
+window.addEventListener('focus', () => {
+  fetch('/api/config').then(() => setOffline(false)).catch(() => setOffline(true));
+});
