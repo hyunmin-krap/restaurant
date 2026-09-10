@@ -336,6 +336,17 @@ function renderBudget(sel, b, label) {
   el_.hidden = false;
 }
 
+function renderLegend() {
+  const box = $('#legend');
+  if (!box || box.childElementCount) return;      // 한 번만 그린다
+  box.replaceChildren(
+    el('span', { class: 'muted' }, '왼쪽 색 = 분류'),
+    ...Object.entries(CATEGORY_COLORS).map(([name, color]) =>
+      el('span', { class: 'legend-item' },
+        el('span', { class: 'legend-chip', style: `background:${color}` }),
+        name)));
+}
+
 function renderPlaces() {
   const q = $('#place-search').value.trim().toLowerCase();
   const showBlocked = $('#show-blocked').checked;
@@ -352,6 +363,7 @@ function renderPlaces() {
 }
 
 async function loadPlaces() {
+  renderLegend();
   const data = await api('/api/places?radius=all');
   state.places = data.items;
   renderPlaces();

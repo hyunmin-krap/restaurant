@@ -287,3 +287,14 @@ a.btn:hover { border-color: var(--accent); color: var(--accent); }
   padding: 11px 16px; text-align: center; font-size: .93rem;
 }
 .offline b { font-weight: 700; }
+
+
+/* 목록 왼쪽 색 띠가 무슨 뜻인지 알려 주는 범례 */
+.legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  margin: 0 0 12px; font-size: .78rem; color: var(--muted);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-chip {
+  width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+}
