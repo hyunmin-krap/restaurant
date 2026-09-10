@@ -9,6 +9,8 @@
 </head>
 <body>
 <header class="topbar">
+  <button id="theme-toggle" class="theme-toggle" type="button"
+          title="밝게 / 어둡게 / 시스템 설정" aria-label="화면 밝기 전환"></button>
   <h1>🍚 오늘 뭐 먹지?</h1>
   <p class="sub" id="subtitle">회사 주변 식당을 랜덤으로 골라 드립니다.</p>
   <nav class="tabs" role="tablist">
@@ -147,10 +149,19 @@
         <input type="checkbox" id="import-exclusive">
         이 목록에 없는 기존 식당은 '점심 안 함'으로 표시
       </label>
+      <p class="hint" style="margin:-4px 0 10px">
+        여러 번 나눠서 붙여넣을 거라면 <b>이 체크는 꺼 두세요.</b>
+        켜면 두 번째 묶음을 올릴 때 첫 번째 묶음이 전부 '점심 안 함'이 됩니다.
+        등록은 <b>계속 쌓이는 방식</b>이니 그냥 나눠서 여러 번 올리시면 됩니다.
+      </p>
       <div class="row">
         <button id="run-import" class="primary" disabled>목록 등록</button>
         <span class="muted" id="import-msg"></span>
       </div>
+      <p style="margin-top:12px">
+        <button id="reset-lunch-open" class="ghost">'점심 안 함' 표시 전부 풀기</button>
+        <span class="muted" id="reset-lunch-msg"></span>
+      </p>
     </div>
 
     <div class="card block">

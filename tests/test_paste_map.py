@@ -65,7 +65,7 @@ class SplitLabelTestCase(unittest.TestCase):
 
 class ExtractFromMapTestCase(unittest.TestCase):
     def setUp(self):
-        self.keep, self.dropped = extract_entries(REAL)
+        self.keep, self.dropped, self.truncated = extract_entries(REAL)
 
     def test_불릿에_달린_place_링크만_식당으로_본다(self):
         self.assertEqual(
@@ -93,11 +93,11 @@ class ExtractFromMapTestCase(unittest.TestCase):
 
     def test_같은_곳이_두_번_나와도_한_번만(self):
         text = "\n".join([bullet("마마반 본점마라탕"), bullet("마마반 본점")])
-        keep, _ = extract_entries(text)
+        keep, _d, _t = extract_entries(text)
         self.assertEqual([e["name"] for e in keep], ["마마반 본점"])
 
     def test_필터를_끄면_카페도_남는다(self):
-        keep, dropped = extract_entries(REAL, drop_cafe=False, drop_pricey=False)
+        keep, dropped, _t = extract_entries(REAL, drop_cafe=False, drop_pricey=False)
         self.assertIn("온오프커피 효창", [e["name"] for e in keep])
         self.assertEqual(dropped, [])
 

@@ -1,3 +1,31 @@
+
+// ── 화면 밝기 ──────────────────────────────────────────────
+// 기본은 OS 설정을 따라가되, 직접 고르면 그 선택을 기억한다.
+const THEMES = [
+  { key: 'light',  label: '☀️ 밝게' },
+  { key: 'dark',   label: '🌙 어둡게' },
+  { key: 'system', label: '🖥️ 시스템' },
+];
+
+function readTheme() {
+  try {
+    const saved = localStorage.getItem('theme');
+    if (THEMES.some((t) => t.key === saved)) return saved;
+  } catch (e) { /* 시크릿 창 등에서 막힐 수 있다. 기본값으로 간다. */ }
+  return 'light';
+}
+
+function applyTheme(key) {
+  if (key === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', key);
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = (THEMES.find((t) => t.key === key) || THEMES[0]).label;
+  try { localStorage.setItem('theme', key); } catch (e) { /* 저장만 실패, 화면은 바뀐다 */ }
+}
+
+// 첫 페인트 전에 적용해서 깜빡임을 막는다.
+applyTheme(readTheme());
+
 'use strict';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -474,6 +502,13 @@ function initEvents() {
     } catch (e) { alert(e.message); }
   });
 
+  applyTheme(readTheme());          // 버튼 글씨를 채운다
+  $('#theme-toggle').addEventListener('click', () => {
+    const now = readTheme();
+    const next = THEMES[(THEMES.findIndex((t) => t.key === now) + 1) % THEMES.length];
+    applyTheme(next.key);
+  });
+
   $('#save-naver-keys').addEventListener('click', async () => {
     const id = $('#naver-id').value.trim();
     const secret = $('#naver-secret').value.trim();
@@ -489,6 +524,17 @@ function initEvents() {
       msg.textContent = cfg.has_naver_keys
         ? '저장했습니다. 이제 붙여넣기 등록이 거리까지 채웁니다.'
         : '저장은 됐지만 키가 비어 있습니다. 다시 확인해 주세요.';
+    } catch (e) { alert(e.message); }
+  });
+
+  $('#reset-lunch-open').addEventListener('click', async () => {
+    if (!confirm("'점심 안 함'으로 표시된 식당을 전부 다시 추천 후보로 되돌립니다.\n계속할까요?")) return;
+    try {
+      const r = await api('/api/lunch-open/reset', { method: 'POST' });
+      $('#reset-lunch-msg').textContent = r.restored
+        ? `${r.restored}곳을 되돌렸습니다.`
+        : "'점심 안 함'으로 표시된 곳이 없습니다.";
+      loadPlaces();
     } catch (e) { alert(e.message); }
   });
 
@@ -546,7 +592,13 @@ function initEvents() {
           : null,
         el('div', { class: 'preview-names' },
           ...data.names.map((n) => el('span', { class: 'pill' }, n))),
-        droppedBox);
+        droppedBox,
+        data.truncated
+          ? el('p', { class: 'warn', style: 'margin:8px 0 0' },
+              `한 번에 등록할 수 있는 ${data.max_entries.toLocaleString()}곳을 넘어 `
+              + `${data.truncated.toLocaleString()}곳이 잘렸습니다. `
+              + '먼저 이만큼 등록한 뒤, 나머지를 다시 붙여넣으세요. 등록은 계속 쌓입니다.')
+          : null);
       box.hidden = false;
     } catch (e) {
       box.replaceChildren(el('div', { class: 'warn' }, e.message));
@@ -571,7 +623,13 @@ function initEvents() {
         method: 'POST',
         body: { text, mark_others_no_lunch: $('#import-exclusive').checked, ...importOptions() },
       });
-      $('#import-msg').textContent = `${previewNames.length}곳 등록 중…`;
+      const n = previewNames.length;
+      // 다음 묶음을 바로 붙여넣을 수 있게 비운다. 등록은 DB 에 쌓이므로 안전하다.
+      $('#import-text').value = '';
+      $('#import-preview').hidden = true;
+      previewNames = [];
+      $('#run-import').disabled = true;
+      $('#import-msg').textContent = `${n}곳 등록 중…`;
       pollSync();
     } catch (e) { alert(e.message); }
   });

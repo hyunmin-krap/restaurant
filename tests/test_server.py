@@ -286,3 +286,66 @@ class NaverKeyFromScreenTestCase(ServerTestCase):
                          {"naver_client_id": "abc", "naver_client_secret": "xyz"})
         self.assertIsNotNone(cfg["naver_budget"])
         self.assertEqual(cfg["naver_budget"]["used"], 0)
+
+
+class LunchOpenResetTestCase(ServerTestCase):
+    """'목록에 없는 곳은 점심 안 함' 을 잘못 켰을 때의 탈출구."""
+
+    def tearDown(self):
+        self.state.conn.execute(
+            "UPDATE places SET lunch_open = NULL WHERE id LIKE 't:%'")
+        self.state.conn.commit()
+
+    def test_점심_안_함_표시를_한꺼번에_푼다(self):
+        for pid in ("t:가돈가스", "t:나국밥"):
+            dbm.set_lunch_open(self.state.conn, pid, False, "manual")
+        self.state.conn.commit()
+        status, data = request(f"{self.base}/api/lunch-open/reset", "POST", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["restored"], 2)
+        rows = self.state.conn.execute(
+            "SELECT lunch_open FROM places WHERE id IN ('t:가돈가스','t:나국밥')").fetchall()
+        self.assertTrue(all(r["lunch_open"] is None for r in rows))
+
+    def test_풀_것이_없으면_0을_돌려준다(self):
+        status, data = request(f"{self.base}/api/lunch-open/reset", "POST", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["restored"], 0)
+
+    def test_점심_영업_표시는_건드리지_않는다(self):
+        dbm.set_lunch_open(self.state.conn, "t:다짬뽕", True, "manual")
+        dbm.set_lunch_open(self.state.conn, "t:라피자", False, "manual")
+        self.state.conn.commit()
+        request(f"{self.base}/api/lunch-open/reset", "POST", {})
+        row = self.state.conn.execute(
+            "SELECT lunch_open FROM places WHERE id = 't:다짬뽕'").fetchone()
+        self.assertEqual(row["lunch_open"], 1)
+
+    def test_되돌리면_다시_추천_후보가_된다(self):
+        from app import service
+        dbm.set_lunch_open(self.state.conn, "t:가돈가스", False, "manual")
+        self.state.conn.commit()
+        names = [c["name"] for c in service.load_candidates(self.state.conn, 500)]
+        self.assertNotIn("가돈가스", names)
+        request(f"{self.base}/api/lunch-open/reset", "POST", {})
+        names = [c["name"] for c in service.load_candidates(self.state.conn, 500)]
+        self.assertIn("가돈가스", names)
+
+
+class PasteLimitTestCase(ServerTestCase):
+    def test_상한을_넘으면_잘린_수를_알려_준다(self):
+        from app.paste import MAX_ENTRIES
+        pc = "https://pcmap.place.naver.com/restaurant/list?query=x#"
+        text = "\n".join(f"* [식당{i}한식]({pc})" for i in range(MAX_ENTRIES + 25))
+        status, data = request(f"{self.base}/api/import/preview", "POST", {"text": text})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["count"], MAX_ENTRIES)
+        self.assertEqual(data["truncated"], 25)
+        self.assertEqual(data["max_entries"], MAX_ENTRIES)
+
+    def test_상한_안이면_잘리지_않는다(self):
+        pc = "https://pcmap.place.naver.com/restaurant/list?query=x#"
+        text = "\n".join(f"* [식당{i}한식]({pc})" for i in range(500))
+        _, data = request(f"{self.base}/api/import/preview", "POST", {"text": text})
+        self.assertEqual(data["count"], 500)
+        self.assertEqual(data["truncated"], 0)

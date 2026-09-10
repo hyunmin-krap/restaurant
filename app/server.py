@@ -14,7 +14,7 @@ from typing import Any, Callable
 from . import budget as budget_mod
 from . import db as dbm
 from . import service
-from .paste import extract_entries
+from .paste import MAX_ENTRIES, extract_entries
 from .config import CONFIG, Config
 from .providers import (
     BudgetExhausted,
@@ -314,7 +314,7 @@ def post_import(h: "LunchHandler", q, body):
     s = h.state
     if s.sync_state.running:
         raise ApiError(409, "이미 작업이 진행 중입니다.")
-    keep, _dropped = extract_entries(
+    keep, _dropped, _truncated = extract_entries(
         body.get("text") or "",
         drop_cafe=body.get("drop_cafe", True),
         drop_pricey=body.get("drop_pricey", True),
@@ -346,7 +346,7 @@ def post_import_preview(h: "LunchHandler", q, body):
 
     카페·주점과 비싼 곳은 걸러 내고, 왜 걸렀는지도 같이 돌려준다.
     """
-    keep, dropped = extract_entries(
+    keep, dropped, truncated = extract_entries(
         body.get("text") or "",
         drop_cafe=body.get("drop_cafe", True),
         drop_pricey=body.get("drop_pricey", True),
@@ -357,7 +357,27 @@ def post_import_preview(h: "LunchHandler", q, body):
         "dropped": dropped,
         "count": len(keep),
         "dropped_count": len(dropped),
+        "truncated": truncated,
+        "max_entries": MAX_ENTRIES,
     }
+
+
+@route("POST", "/api/lunch-open/reset")
+def post_lunch_open_reset(h: "LunchHandler", q, body):
+    """'점심 안 함' 표시를 한꺼번에 지운다.
+
+    붙여넣기 등록에서 '목록에 없는 곳은 점심 안 함' 을 켠 채 두 번째 묶음을
+    올리면 첫 번째 묶음이 통째로 잠긴다. 그때 되돌릴 길이 필요하다.
+    식당 자체는 지워지지 않으므로 표시만 풀면 그대로 살아난다.
+    """
+    s = h.state
+    with s.lock:
+        cur = s.conn.execute(
+            "UPDATE places SET lunch_open = NULL, lunch_source = NULL "
+            " WHERE is_active = 1 AND lunch_open = 0"
+        )
+        s.conn.commit()
+    return {"ok": True, "restored": cur.rowcount}
 
 
 @route("POST", "/api/enrich")

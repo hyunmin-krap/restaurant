@@ -27,6 +27,10 @@ from .categories import paste_exclusion_reason
 
 MAX_NAME_LEN = 40
 
+# 한 번에 붙여넣을 수 있는 식당 수. 지도 목록을 통째로 긁어도 남게 넉넉히 잡는다.
+# 넘치면 조용히 자르지 않고 화면에 '몇 곳이 잘렸다' 고 알려 준다.
+MAX_ENTRIES = 2000
+
 # --------------------------------------------------------------------------
 # 마크다운 링크 형식
 # --------------------------------------------------------------------------
@@ -262,12 +266,12 @@ def _entries_from_lines(text: str) -> list[dict[str, str]]:
 
 def extract_entries(
     text: str,
-    limit: int = 400,
+    limit: int = MAX_ENTRIES,
     *,
     drop_cafe: bool = True,
     drop_pricey: bool = True,
-) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """붙여넣은 덩어리에서 (등록할 곳, 걸러 낸 곳)을 돌려준다.
+) -> tuple[list[dict[str, str]], list[dict[str, str]], int]:
+    """붙여넣은 덩어리에서 (등록할 곳, 걸러 낸 곳, 상한에 잘린 수)를 돌려준다.
 
     걸러 낸 항목에는 왜 걸렀는지(`reason`)가 붙는다. 화면에서 그대로 보여 준다.
     """
@@ -278,8 +282,9 @@ def extract_entries(
     keep: list[dict[str, str]] = []
     dropped: list[dict[str, str]] = []
     seen: set[str] = set()
+    truncated = 0
 
-    for entry in entries:
+    for idx, entry in enumerate(entries):
         key = entry["name"].replace(" ", "")
         if key in seen:
             continue
@@ -291,13 +296,15 @@ def extract_entries(
         if reason:
             dropped.append({**entry, "reason": reason})
             continue
-        keep.append(entry)
         if len(keep) >= limit:
+            # 조용히 자르면 등록이 안 된 걸 모른 채 넘어간다. 몇 곳이 남았는지 센다.
+            truncated = len(entries) - idx
             break
-    return keep, dropped
+        keep.append(entry)
+    return keep, dropped, truncated
 
 
-def extract_names(text: str, limit: int = 400, **kwargs) -> list[str]:
+def extract_names(text: str, limit: int = MAX_ENTRIES, **kwargs) -> list[str]:
     """등록 대상 상호명만 순서대로 돌려준다."""
-    keep, _ = extract_entries(text, limit, **kwargs)
+    keep, _dropped, _truncated = extract_entries(text, limit, **kwargs)
     return [e["name"] for e in keep]
