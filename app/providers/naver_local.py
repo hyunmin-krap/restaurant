@@ -16,7 +16,31 @@ from ..categories import is_restaurant
 from ..geo import haversine_m, parse_naver_coords
 from .base import BudgetExhausted, Place, ProviderError, http_json, strip_tags
 
-ENDPOINT = "https://openapi.naver.com/v1/search/local.json"
+
+def _is_auth_failure(exc: ProviderError) -> bool:
+    """키가 그쪽 것이 아니라서 막힌 건지. 그럴 때만 다른 주소를 시도한다."""
+    text = str(exc)
+    return any(f"HTTP {code} " in text for code in _AUTH_CODES)
+
+# 지역검색을 부를 수 있는 곳이 두 군데다. 주소도 헤더 이름도 다르다.
+#   * API HUB  - 네이버 클라우드. 2026-07-31 이후 새로 받는 키는 전부 이쪽이다.
+#   * 개발자센터 - 그 전에 받아 둔 키. 2027-06-30 까지 쓸 수 있다.
+# 키만 보고는 어느 쪽인지 알 수 없어서, 한 번 불러 보고 정한다.
+FLAVORS: dict[str, dict] = {
+    "hub": {
+        "label": "NAVER API HUB",
+        "endpoint": "https://naverapihub.apigw.ntruss.com/search/v1/local",
+        "headers": ("X-NCP-APIGW-API-KEY-ID", "X-NCP-APIGW-API-KEY"),
+    },
+    "legacy": {
+        "label": "네이버 개발자센터",
+        "endpoint": "https://openapi.naver.com/v1/search/local.json",
+        "headers": ("X-Naver-Client-Id", "X-Naver-Client-Secret"),
+    },
+}
+
+# 키가 그쪽 것이 아닐 때 돌아오는 상태 코드. 이것만 다른 쪽을 시도한다.
+_AUTH_CODES = (401, 403, 404)
 
 # 지역명과 조합해서 던질 음식 키워드. 넓게 훑으려고 일부러 겹치게 뒀다.
 FOOD_KEYWORDS: tuple[str, ...] = (
@@ -42,6 +66,7 @@ class NaverLocalProvider:
         client_secret: str,
         request_delay: float = 0.12,
         guard: Callable[[], None] | None = None,
+        flavor: str = "auto",
     ) -> None:
         if not client_id or not client_secret:
             raise ProviderError(
@@ -55,13 +80,17 @@ class NaverLocalProvider:
         # 호출 직전마다 불린다. 한도를 넘었으면 BudgetExhausted 를 올려 막는다.
         # search() 한 곳만 통과하면 되므로 어느 경로로 들어와도 빠짐없이 세어진다.
         self.guard = guard
+        # 'auto' 면 첫 호출에서 되는 쪽을 찾아 그다음부터는 그쪽만 쓴다.
+        self.flavor = flavor if flavor in FLAVORS else "auto"
 
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {
-            "X-Naver-Client-Id": self.client_id,
-            "X-Naver-Client-Secret": self.client_secret,
-        }
+    def _headers(self, flavor: str) -> dict[str, str]:
+        id_key, secret_key = FLAVORS[flavor]["headers"]
+        return {id_key: self.client_id, secret_key: self.client_secret}
+
+    def _call(self, flavor: str, params: str) -> list[dict]:
+        url = f"{FLAVORS[flavor]['endpoint']}?{params}"
+        payload = http_json(url, headers=self._headers(flavor))
+        return payload.get("items", []) or []
 
     def search(self, query: str, display: int = 5) -> list[dict]:
         if self.guard is not None:
@@ -69,8 +98,27 @@ class NaverLocalProvider:
         params = urllib.parse.urlencode(
             {"query": query, "display": max(1, min(5, display)), "start": 1, "sort": "random"}
         )
-        payload = http_json(f"{ENDPOINT}?{params}", headers=self._headers)
-        return payload.get("items", []) or []
+        if self.flavor != "auto":
+            return self._call(self.flavor, params)
+
+        # 어느 쪽 키인지 모를 때. HUB 를 먼저 보고, 인증에서 막히면 예전 쪽을 본다.
+        # 되는 쪽을 찾으면 기억해서 다음부터는 한 번만 부른다.
+        first_error: ProviderError | None = None
+        for flavor in ("hub", "legacy"):
+            try:
+                items = self._call(flavor, params)
+            except ProviderError as exc:
+                if not _is_auth_failure(exc):
+                    raise                    # 잠깐 끊긴 것 등은 그대로 올린다
+                first_error = first_error or exc
+                continue
+            self.flavor = flavor
+            return items
+        raise ProviderError(
+            "네이버 검색 API 키가 거절당했습니다. NAVER API HUB 와 개발자센터 양쪽 주소로 "
+            f"시도했지만 둘 다 인증에 실패했습니다. Client ID/Secret 을 다시 확인해 주세요. "
+            f"({first_error})"
+        )
 
     def _to_place(self, item: dict, office: tuple[float, float]) -> Place | None:
         name = strip_tags(item.get("title"))
@@ -113,6 +161,7 @@ class NaverLocalProvider:
         """지역 키워드 + 음식 키워드를 돌면서 반경 안의 식당을 흘려보낸다."""
         seen: set[str] = set()
         office = (office_lat, office_lng)
+        failures: list[str] = []
         for idx, keyword in enumerate(keywords, start=1):
             query = f"{area_keyword} {keyword}".strip()
             try:
@@ -120,8 +169,14 @@ class NaverLocalProvider:
             except BudgetExhausted:
                 raise                      # 남은 키워드를 더 돌아 봐야 소용없다
             except ProviderError as exc:
+                failures.append(str(exc))
                 if on_progress:
                     on_progress(idx, len(keywords), query, f"실패: {exc}")
+                # 처음 몇 번이 내리 실패하면 키나 주소 문제다. 76번을 헛돌 이유가 없다.
+                if len(failures) >= 3 and not seen:
+                    raise ProviderError(
+                        f"검색 요청이 계속 실패해서 멈췄습니다. {failures[0]}"
+                    ) from exc
                 continue
             found = 0
             for item in items:
@@ -136,3 +191,6 @@ class NaverLocalProvider:
             if on_progress:
                 on_progress(idx, len(keywords), query, f"{found}곳 추가")
             time.sleep(self.request_delay)
+
+        if failures and not seen:
+            raise ProviderError(f"{len(failures)}개 검색이 모두 실패했습니다. {failures[0]}")

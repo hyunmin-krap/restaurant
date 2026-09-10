@@ -419,9 +419,12 @@ function pollSync() {
     const ratio = s.total ? Math.round((s.done / s.total) * 100) : 0;
     $('#sync-bar').style.width = `${ratio}%`;
     $('#sync-msg').textContent = s.error ? `오류: ${s.error}` : `${s.message} (${s.done}/${s.total})`;
+    // 실패는 회색 작은 글씨로 흘려보내지 않는다. 눈에 띄어야 손을 쓸 수 있다.
+    $('#sync-msg').classList.toggle('warn', !!s.error);
+    $('#sync-msg').classList.toggle('muted', !s.error);
     if (!s.running) {
       clearInterval(pollTimer);
-      await Promise.all([loadPlaces(), loadStats()]);
+      await Promise.all([loadPlaces(), loadStats(), loadConfig()]);
     }
   }, 900);
 }
