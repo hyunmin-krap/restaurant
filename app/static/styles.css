@@ -111,8 +111,14 @@ label.inline select, label.inline input { width: auto; margin-top: 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── 추천 ─────────────────────────────────────────────────── */
-.pick-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 22px 0 6px; }
-.note { color: var(--accent); font-size: .87rem; min-height: 1.2em; margin: 6px 0 0; font-weight: 600; }
+.pick-actions {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  align-items: center; justify-content: center; margin: 22px 0 6px;
+}
+.note {
+  color: var(--accent); font-size: .87rem; min-height: 1.2em;
+  margin: 6px 0 0; font-weight: 600; text-align: center;
+}
 .hint { color: var(--muted); font-size: .86rem; }
 .muted { color: var(--muted); font-size: .84rem; }
 .warn { color: var(--rose); font-size: .86rem; white-space: pre-wrap; font-weight: 500; }
