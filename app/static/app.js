@@ -500,7 +500,14 @@ function initEvents() {
             $('#cfg-lng').value = it.lng;
             if (!$('#cfg-office-name').value.trim()) $('#cfg-office-name').value = it.name;
             box.hidden = true;
-            $('#cfg-saved').textContent = `${it.name} 좌표를 넣었습니다. [저장] 을 눌러 주세요.`;
+            // 좌표는 숫자라 눈으로 맞는지 알 수 없다. 지도에서 확인할 길을 같이 준다.
+            $('#cfg-saved').replaceChildren(
+              document.createTextNode(`${it.name} (${it.lat}, ${it.lng}) — `),
+              el('a', {
+                href: `https://map.naver.com/p/search/${encodeURIComponent(it.address || it.name)}`,
+                target: '_blank', rel: 'noopener',
+              }, '지도에서 확인'),
+              document.createTextNode(' 후 [저장] 을 눌러 주세요.'));
           },
         }, `${it.name} — ${it.address}`)));
     } catch (e) {
