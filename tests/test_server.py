@@ -383,3 +383,51 @@ class CallLimitSettingTestCase(ServerTestCase):
         self.state.conn.execute(
             "DELETE FROM settings WHERE key LIKE 'naver_calls_%'")
         self.state.conn.commit()
+
+
+class SearchQueryTestCase(unittest.TestCase):
+    """지도 링크 검색어. 주소를 통째로 붙이면 오히려 아무것도 안 나온다."""
+
+    def test_건물이름과_층은_빼고_동만_붙인다(self):
+        from app.service import _search_query
+        place = {
+            "name": "몽중헌 공덕점",
+            "road_address": "서울특별시 마포구 마포대로 92 효성 해링턴스퀘어 A동 2F",
+            "address": "서울 마포구 도화동 25-1",
+        }
+        self.assertEqual(_search_query(place), "몽중헌 공덕점 도화동")
+
+    def test_지번주소가_없으면_도로명에서_구를_쓴다(self):
+        from app.service import _search_query
+        place = {"name": "어떤집", "road_address": "서울 마포구 백범로 1길 60", "address": ""}
+        self.assertEqual(_search_query(place), "어떤집 마포구")
+
+    def test_상호명에_이미_동이_있으면_또_붙이지_않는다(self):
+        from app.service import _search_query
+        place = {"name": "공덕동 할머니 빈대떡", "road_address": "",
+                 "address": "서울 마포구 공덕동 50"}
+        self.assertEqual(_search_query(place), "공덕동 할머니 빈대떡")
+
+    def test_주소가_아예_없으면_상호명만(self):
+        from app.service import _search_query
+        self.assertEqual(
+            _search_query({"name": "이름만있는집", "road_address": "", "address": ""}),
+            "이름만있는집")
+
+    def test_플레이스_id_가_있으면_상세페이지로_바로_간다(self):
+        from app.service import naver_map_url
+        url = naver_map_url({"name": "몽중헌", "naver_place_id": "123456"})
+        self.assertEqual(url, "https://map.naver.com/p/entry/place/123456")
+
+
+class OfficeLookupTestCase(ServerTestCase):
+    def test_키가_없으면_안내한다(self):
+        status, data = request(f"{self.base}/api/office/lookup", "POST",
+                               {"query": "신원빌딩"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+    def test_너무_짧으면_거절한다(self):
+        status, data = request(f"{self.base}/api/office/lookup", "POST", {"query": "가"})
+        self.assertEqual(status, 400)
+        self.assertIn("2글자", data["error"])

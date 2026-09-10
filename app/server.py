@@ -14,10 +14,11 @@ from typing import Any, Callable
 from . import budget as budget_mod
 from . import db as dbm
 from . import service
+from .geo import haversine_m, parse_naver_coords
 from .paste import MAX_ENTRIES, extract_entries
 from .config import CONFIG, Config
 from .providers import (
-    BudgetExhausted,
+    BudgetExhausted, strip_tags,
     GooglePlacesProvider, NaverLocalProvider, NaverPlaceReviewProvider, ProviderError,
 )
 from .sync import SyncState, enrich_places, import_named_places, run_in_thread, sync_places
@@ -375,6 +376,42 @@ def post_import_preview(h: "LunchHandler", q, body):
         "truncated": truncated,
         "max_entries": MAX_ENTRIES,
     }
+
+
+@route("POST", "/api/office/lookup")
+def post_office_lookup(h: "LunchHandler", q, body):
+    """건물명·주소로 좌표를 찾아 후보를 돌려준다.
+
+    위도·경도를 손으로 넣게 하면 거의 틀린다. 기본값도 공덕역을 대충 찍은
+    좌표라 길찾기 출발점이 엉뚱한 곳에 잡혔다. 검색 API 를 이미 쓰고 있으니
+    회사 위치도 같은 방식으로 집어 주는 게 맞다.
+    """
+    s = h.state
+    query = (body.get("query") or "").strip()
+    if len(query) < 2:
+        raise ApiError(400, "건물명이나 주소를 2글자 이상 넣어 주세요.")
+    try:
+        provider = _naver_provider(s)
+        items = provider.search(query, display=5)
+    except ProviderError as exc:
+        raise ApiError(400, str(exc)) from exc
+
+    out = []
+    for item in items:
+        coords = parse_naver_coords(item.get("mapx"), item.get("mapy"))
+        if coords is None:
+            continue
+        lat, lng = coords
+        out.append({
+            "name": strip_tags(item.get("title")),
+            "address": (item.get("roadAddress") or item.get("address") or "").strip(),
+            "lat": round(lat, 7),
+            "lng": round(lng, 7),
+            "distance_m": round(haversine_m(*s.office, lat, lng)),
+        })
+    if not out:
+        raise ApiError(404, f"'{query}' 을(를) 찾지 못했습니다. 도로명 주소로도 해 보세요.")
+    return {"items": out}
 
 
 @route("POST", "/api/lunch-open/reset")

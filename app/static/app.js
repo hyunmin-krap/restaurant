@@ -482,6 +482,32 @@ function initEvents() {
     } catch (e) { alert(e.message); }
   });
 
+  $('#office-lookup').addEventListener('click', async () => {
+    const box = $('#office-results');
+    const query = $('#office-query').value.trim() || $('#cfg-office-name').value.trim();
+    if (!query) return alert('건물명이나 주소를 넣어 주세요.');
+    box.replaceChildren(el('div', { class: 'preview-head' }, '찾는 중…'));
+    box.hidden = false;
+    try {
+      const data = await api('/api/office/lookup', { method: 'POST', body: { query } });
+      box.replaceChildren(
+        el('div', { class: 'preview-head' }, '맞는 곳을 고르세요'),
+        ...data.items.map((it) => el('button', {
+          class: 'ghost',
+          style: 'display:block;width:100%;text-align:left;margin:4px 0',
+          onclick: () => {
+            $('#cfg-lat').value = it.lat;
+            $('#cfg-lng').value = it.lng;
+            if (!$('#cfg-office-name').value.trim()) $('#cfg-office-name').value = it.name;
+            box.hidden = true;
+            $('#cfg-saved').textContent = `${it.name} 좌표를 넣었습니다. [저장] 을 눌러 주세요.`;
+          },
+        }, `${it.name} — ${it.address}`)));
+    } catch (e) {
+      box.replaceChildren(el('div', { class: 'warn' }, e.message));
+    }
+  });
+
   $('#save-naver-limit').addEventListener('click', async () => {
     try {
       await api('/api/config', {

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import re
 import sqlite3
 from typing import Any
 
@@ -28,10 +29,38 @@ SELECT p.*,
 """
 
 
+# 지번주소에서 동 이름만 집어낸다. '서울 마포구 도화동 25-1' -> '도화동'
+# 'A동 2F' 처럼 건물 동·층은 한글로 시작하지 않아서 걸리지 않는다.
+_DONG = re.compile(r"[가-힣]{2,}\d*(?:동|가|읍|면|리)(?=\s|$)")
+_GU = re.compile(r"[가-힣]{2,}(?:구|군|시)(?=\s|$)")
+
+
+def _locality(place: dict[str, Any]) -> str:
+    """상호명에 붙일 짧은 지역명. 없으면 빈 문자열."""
+    # 지번주소를 먼저 본다. 도로명주소에는 건물 이름·층이 붙어 있어 검색을 망친다.
+    for field in ("address", "road_address"):
+        text = (place.get(field) or "").strip()
+        if not text:
+            continue
+        found = _DONG.search(text) or _GU.search(text)
+        if found:
+            return found.group(0)
+    return ""
+
+
 def _search_query(place: dict[str, Any]) -> str:
-    return " ".join(
-        filter(None, [place.get("name"), place.get("road_address") or place.get("address")])
-    )
+    """네이버 지도 검색어.
+
+    주소를 통째로 붙이면 '몽중헌 공덕점 서울특별시 마포구 마포대로 92 효성
+    해링턴스퀘어 A동 2F' 가 되어 오히려 아무것도 안 나온다.
+    상호명 + 동 이름이면 충분히 좁혀지고 확실히 걸린다.
+    """
+    name = (place.get("name") or "").strip()
+    dong = _locality(place)
+    # 상호명에 이미 지역이 들어 있으면('공덕점') 굳이 또 붙이지 않는다.
+    if dong and dong[:-1] and dong[:-1] in name.replace(" ", ""):
+        dong = ""
+    return " ".join(filter(None, [name, dong]))
 
 
 def naver_map_url(place: dict[str, Any]) -> str:

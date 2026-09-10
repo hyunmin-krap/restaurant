@@ -74,11 +74,21 @@
       <div class="grid2">
         <label>회사 이름<input id="cfg-office-name" type="text"></label>
         <label>지역 키워드 <span class="tip" title="수집할 때 쓰는 검색어입니다. 예: 역삼동, 판교역">?</span><input id="cfg-area" type="text" placeholder="예: 역삼동"></label>
-        <label>위도 <span class="tip" title="네이버 지도에서 건물을 찍으면 주소창이 c=경도,위도,... 로 바뀝니다. 그 값을 넣으세요.">?</span><input id="cfg-lat" type="number" step="0.0000001"></label>
+        <label>위도 <span class="tip" title="아래 '주소로 찾기' 를 쓰면 자동으로 채워집니다.">?</span><input id="cfg-lat" type="number" step="0.0000001"></label>
         <label>경도<input id="cfg-lng" type="number" step="0.0000001"></label>
         <label>반경(m)<input id="cfg-radius" type="number" min="100" step="50"></label>
         <label>추천 개수<input id="cfg-count" type="number" min="1" max="12"></label>
       </div>
+      <div class="row" style="gap:8px;margin:12px 0 4px">
+        <input id="office-query" type="text" style="flex:1;min-width:200px"
+               placeholder="건물명이나 도로명 주소 (예: 신원빌딩 마포대로 122)">
+        <button id="office-lookup" class="ghost">주소로 찾기</button>
+      </div>
+      <p class="hint" style="margin:0 0 8px">
+        길찾기 출발점이 엉뚱하게 잡히면 좌표가 안 맞는 것입니다.
+        건물명으로 찾아서 고르면 위도·경도가 정확히 채워집니다.
+      </p>
+      <div id="office-results" class="preview" hidden></div>
       <button id="cfg-save" class="primary">저장</button>
       <span class="muted" id="cfg-saved"></span>
     </div>
