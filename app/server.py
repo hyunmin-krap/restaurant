@@ -144,6 +144,7 @@ def post_config(h: "LunchHandler", q, body):
                "recommend_count", "area_keyword",
                "naver_monthly_call_limit", "naver_daily_call_limit"}
     secrets = {"naver_client_id", "naver_client_secret"}
+    before = h.state.office
     for key, value in body.items():
         if key in allowed and value not in (None, ""):
             dbm.set_setting(h.state.conn, key, str(value))
@@ -151,7 +152,16 @@ def post_config(h: "LunchHandler", q, body):
             # 붙여넣을 때 앞뒤 공백이 딸려 오는 일이 잦다.
             # 빈 값으로 저장하면 .env 값으로 되돌아간다.
             dbm.set_setting(h.state.conn, key, str(value).strip())
-    return get_config(h, q, body)
+
+    # 회사 위치가 바뀌면 저장된 거리가 전부 틀어진다. 식당 좌표는 이미 있으니
+    # 다시 수집할 것 없이 여기서 계산만 다시 한다 (API 호출 0건).
+    moved = 0
+    if h.state.office != before:
+        moved = _recompute_distances(h.state)
+    result = get_config(h, q, body)
+    if moved:
+        result["distances_updated"] = moved
+    return result
 
 
 @route("GET", "/api/recommend")
@@ -458,6 +468,23 @@ def post_enrich(h: "LunchHandler", q, body):
             "hours_source": "google" if google else "naver",
             "taste": bool(reviewer),
             "google_budget": budget_mod.status(s.conn, "google", s.config.google_monthly_call_limit)}
+
+
+def _recompute_distances(s: "AppState") -> int:
+    """회사 좌표가 바뀌었을 때 모든 식당의 거리를 다시 잰다."""
+    lat, lng = s.office
+    rows = s.conn.execute(
+        "SELECT id, lat, lng FROM places WHERE lat IS NOT NULL AND lng IS NOT NULL"
+    ).fetchall()
+    updates = [
+        (round(haversine_m(lat, lng, r["lat"], r["lng"]), 1), r["id"]) for r in rows
+    ]
+    if not updates:
+        return 0
+    with s.lock:
+        s.conn.executemany("UPDATE places SET distance_m = ? WHERE id = ?", updates)
+        s.conn.commit()
+    return len(updates)
 
 
 def _naver_provider(s: "AppState") -> NaverLocalProvider:

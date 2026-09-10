@@ -475,7 +475,7 @@ function initEvents() {
 
   $('#cfg-save').addEventListener('click', async () => {
     try {
-      await api('/api/config', {
+      const saved = await api('/api/config', {
         method: 'POST',
         body: {
           office_name: $('#cfg-office-name').value, area_keyword: $('#cfg-area').value,
@@ -483,9 +483,12 @@ function initEvents() {
           radius_m: $('#cfg-radius').value, recommend_count: $('#cfg-count').value,
         },
       });
-      $('#cfg-saved').textContent = '저장했습니다';
-      setTimeout(() => { $('#cfg-saved').textContent = ''; }, 2000);
+      $('#cfg-saved').textContent = saved.distances_updated
+        ? `저장했습니다 — 식당 ${saved.distances_updated}곳의 거리를 다시 쟀습니다`
+        : '저장했습니다';
+      setTimeout(() => { $('#cfg-saved').textContent = ''; }, 4000);
       await loadConfig();
+      await Promise.all([loadPlaces(), loadStats()]);
     } catch (e) {
       // 아무 말 없이 실패하면 '저장이 안 된다' 로만 보인다.
       $('#cfg-saved').textContent = e.message;

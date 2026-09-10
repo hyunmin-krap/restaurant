@@ -450,3 +450,48 @@ class OfficeLookupTestCase(ServerTestCase):
         status, data = request(f"{self.base}/api/office/lookup", "POST", {"query": "가"})
         self.assertEqual(status, 400)
         self.assertIn("2글자", data["error"])
+
+
+class OfficeMoveTestCase(ServerTestCase):
+    """회사 위치를 옮기면 저장된 거리가 전부 틀어진다. 다시 수집할 일은 아니다."""
+
+    def tearDown(self):
+        request(f"{self.base}/api/config", "POST",
+                {"office_lat": 37.5, "office_lng": 127.03})
+        for name, cat, dist in FIXTURES:
+            self.state.conn.execute(
+                "UPDATE places SET distance_m = ? WHERE id = ?", (dist, f"t:{name}"))
+        self.state.conn.commit()
+
+    def test_좌표를_옮기면_거리를_다시_잰다(self):
+        status, data = request(f"{self.base}/api/config", "POST",
+                               {"office_lat": 37.54306, "office_lng": 126.95111})
+        self.assertEqual(status, 200)
+        self.assertEqual(data["distances_updated"], len(FIXTURES))
+        row = self.state.conn.execute(
+            "SELECT distance_m FROM places WHERE id = 't:가돈가스'").fetchone()
+        # 고정값 120m 에서 실제 좌표 기준으로 바뀌었다
+        self.assertNotEqual(row["distance_m"], 120.0)
+        self.assertGreater(row["distance_m"], 1000)
+
+    def test_좌표가_그대로면_건드리지_않는다(self):
+        _, data = request(f"{self.base}/api/config", "POST", {"office_name": "그대로"})
+        self.assertNotIn("distances_updated", data)
+
+    def test_좌표_없는_식당은_그대로_둔다(self):
+        from app import db as dbm
+        dbm.upsert_place(self.state.conn, {
+            "id": "t:좌표없음", "name": "좌표없음", "road_address": "", "address": "",
+            "lat": None, "lng": None, "raw_category": "음식점>한식",
+            "major_category": "한식", "detail_category": "백반",
+            "phone": "", "link": "", "naver_place_id": None,
+            "distance_m": None, "source": "test",
+        })
+        self.state.conn.commit()
+        request(f"{self.base}/api/config", "POST",
+                {"office_lat": 37.54306, "office_lng": 126.95111})
+        row = self.state.conn.execute(
+            "SELECT distance_m FROM places WHERE id = 't:좌표없음'").fetchone()
+        self.assertIsNone(row["distance_m"])
+        self.state.conn.execute("DELETE FROM places WHERE id = 't:좌표없음'")
+        self.state.conn.commit()
