@@ -579,7 +579,7 @@ function initEvents() {
                 names.join(', '))))
         : null;
 
-      box.replaceChildren(
+      box.replaceChildren(...[
         el('div', { class: 'preview-head' },
           data.count ? `식당 ${data.count}곳을 찾았습니다` : '상호명을 찾지 못했습니다',
           data.count
@@ -598,7 +598,8 @@ function initEvents() {
               `한 번에 등록할 수 있는 ${data.max_entries.toLocaleString()}곳을 넘어 `
               + `${data.truncated.toLocaleString()}곳이 잘렸습니다. `
               + '먼저 이만큼 등록한 뒤, 나머지를 다시 붙여넣으세요. 등록은 계속 쌓입니다.')
-          : null);
+          : null,
+      ].filter(Boolean));
       box.hidden = false;
     } catch (e) {
       box.replaceChildren(el('div', { class: 'warn' }, e.message));

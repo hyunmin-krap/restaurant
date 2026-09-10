@@ -147,7 +147,20 @@ def _is_link_noise(label: str) -> bool:
 
 
 def _entries_from_links(text: str) -> list[dict[str, str]]:
-    """마크다운 링크 형식에서 (상호명, 업종)을 뽑는다."""
+    """마크다운 링크 형식에서 (상호명, 업종)을 뽑는다.
+
+    목록을 드래그하면 식당뿐 아니라 리뷰 쓴 사람 닉네임까지 같은 모양의
+    링크로 딸려 온다 ('체리4810', '긍정적인 뽀로로', 'line3373' ...).
+    링크 주소도 상호명과 똑같아서 주소로는 구분이 안 된다.
+
+    구분되는 건 업종이다. 지도 목록의 식당에는 상호명 뒤에 업종이 반드시
+    붙지만(한식·일식당·카페...), 닉네임에는 붙지 않는다. 그래서 업종을
+    떼어 내지 못한 항목은 식당이 아니라고 본다.
+
+    대가로 광고 블록처럼 업종이 다음 줄에 있는 항목 몇 개를 놓치지만,
+    그런 건 대개 위쪽에 본 항목이 따로 있다. 닉네임 수십 개가 식당으로
+    섞여 드는 쪽이 훨씬 나쁘다.
+    """
     out: list[dict[str, str]] = []
     for raw in (text or "").splitlines():
         if not _BULLET.match(raw):
@@ -159,6 +172,8 @@ def _entries_from_links(text: str) -> list[dict[str, str]]:
         if _is_link_noise(label):
             continue
         name, category = _split_label(label)
+        if not category:
+            continue
         if len(name) < 2 or len(name) > MAX_NAME_LEN:
             continue
         out.append({"name": name, "category": category})

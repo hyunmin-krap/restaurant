@@ -218,3 +218,48 @@ class KeylessImportTestCase(unittest.TestCase):
         )
         row = self.conn.execute("SELECT detail_category FROM places").fetchone()
         self.assertEqual(row["detail_category"], "설렁탕")
+
+
+class ReviewerNicknameTestCase(unittest.TestCase):
+    """목록을 드래그하면 리뷰 쓴 사람 닉네임이 같은 모양의 링크로 딸려 온다."""
+
+    NICKS = ["체리4810", "사탕공장14", "NEWS WIN", "line3373", "남다른 CEO",
+             "크로마 스토리", "기쁨감사", "freshjh124", "White45", "단아한김션",
+             "긍정적인 뽀로로", "카모메41"]
+
+    def test_닉네임은_식당으로_보지_않는다(self):
+        text = "\n".join(bullet(n) for n in self.NICKS)
+        keep, dropped, _ = extract_entries(text)
+        self.assertEqual(keep, [])
+        self.assertEqual(dropped, [])
+
+    def test_닉네임_사이에_섞인_식당은_살린다(self):
+        text = "\n".join([
+            bullet("체리4810"),
+            bullet("역전회관 마포본점예약톡톡쿠폰한식"),
+            bullet("긍정적인 뽀로로"),
+            bullet("을밀대 평양냉면냉면"),
+            bullet("line3373"),
+        ])
+        self.assertEqual(
+            extract_names(text), ["역전회관 마포본점", "을밀대 평양냉면"]
+        )
+
+    def test_업종이_안_붙은_항목은_거른다(self):
+        # 지도 목록의 식당에는 업종이 반드시 붙는다. 안 붙었으면 닉네임 쪽으로 본다.
+        for label in ("황태뚝배기", "긍정적인 뽀로로", "크로마 스토리"):
+            self.assertEqual(extract_names(bullet(label)), [], label)
+
+    def test_상호명이_업종으로_끝나도_하나만_뗀다(self):
+        # 지도는 '황태뚝배기해장국' + 업종 '해장국' 을 붙여 보내므로 이렇게 온다.
+        self.assertEqual(
+            extract_names(bullet("황태뚝배기해장국해장국")), ["황태뚝배기해장국"]
+        )
+        # 업종이 한 번만 붙어 오면 상호명 끝인지 업종인지 구분할 길이 없다.
+        # 이때는 식당 쪽으로 본다 (닉네임을 들이는 것보다 덜 나쁘다).
+        self.assertEqual(extract_names(bullet("황태뚝배기해장국")), ["황태뚝배기"])
+
+    def test_링크_없는_줄_단위_입력에는_적용하지_않는다(self):
+        # 손으로 정리해 붙여넣는 경우는 업종이 없는 게 정상이다.
+        plain = "1\n공덕 돈까스\n돈까스\n4.52 (120)\n"
+        self.assertEqual(extract_names(plain), ["공덕 돈까스"])
