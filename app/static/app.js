@@ -1,31 +1,3 @@
-
-// ── 화면 밝기 ──────────────────────────────────────────────
-// 기본은 OS 설정을 따라가되, 직접 고르면 그 선택을 기억한다.
-const THEMES = [
-  { key: 'light',  label: '☀️ 밝게' },
-  { key: 'dark',   label: '🌙 어둡게' },
-  { key: 'system', label: '🖥️ 시스템' },
-];
-
-function readTheme() {
-  try {
-    const saved = localStorage.getItem('theme');
-    if (THEMES.some((t) => t.key === saved)) return saved;
-  } catch (e) { /* 시크릿 창 등에서 막힐 수 있다. 기본값으로 간다. */ }
-  return 'light';
-}
-
-function applyTheme(key) {
-  if (key === 'system') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', key);
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = (THEMES.find((t) => t.key === key) || THEMES[0]).label;
-  try { localStorage.setItem('theme', key); } catch (e) { /* 저장만 실패, 화면은 바뀐다 */ }
-}
-
-// 첫 페인트 전에 적용해서 깜빡임을 막는다.
-applyTheme(readTheme());
-
 'use strict';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -500,13 +472,6 @@ function initEvents() {
       await api('/api/enrich', { method: 'POST', body: { limit: 60 } });
       pollSync();
     } catch (e) { alert(e.message); }
-  });
-
-  applyTheme(readTheme());          // 버튼 글씨를 채운다
-  $('#theme-toggle').addEventListener('click', () => {
-    const now = readTheme();
-    const next = THEMES[(THEMES.findIndex((t) => t.key === now) + 1) % THEMES.length];
-    applyTheme(next.key);
   });
 
   $('#save-naver-keys').addEventListener('click', async () => {
