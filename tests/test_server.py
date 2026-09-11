@@ -495,3 +495,60 @@ class OfficeMoveTestCase(ServerTestCase):
         self.assertIsNone(row["distance_m"])
         self.state.conn.execute("DELETE FROM places WHERE id = 't:좌표없음'")
         self.state.conn.commit()
+
+
+class PlaceSearchTestCase(ServerTestCase):
+    """이름으로 찾아 추가. 수집이 5건 제한 때문에 놓친 집을 넣는 길."""
+
+    def test_너무_짧으면_거절한다(self):
+        status, data = request(f"{self.base}/api/places/search", "POST", {"query": "가"})
+        self.assertEqual(status, 400)
+        self.assertIn("2글자", data["error"])
+
+    def test_키가_없으면_안내한다(self):
+        status, data = request(f"{self.base}/api/places/search", "POST",
+                               {"query": "은하장"})
+        self.assertEqual(status, 400)
+        self.assertIn("error", data)
+
+
+class MultiAreaTestCase(unittest.TestCase):
+    """지역 키워드를 쉼표로 여러 개 주면 그만큼 더 넓게 훑는다."""
+
+    def setUp(self):
+        import app.providers.naver_local as mod
+        self._orig = mod.http_json
+        self.addCleanup(lambda: setattr(mod, "http_json", self._orig))
+        self.queries = []
+
+        def fake(url, headers=None, **kw):
+            import urllib.parse
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            self.queries.append(q["query"][0])
+            return {"items": []}
+
+        mod.http_json = fake
+
+    def _collect(self, area):
+        from app.providers import NaverLocalProvider
+        p = NaverLocalProvider("id", "sec", request_delay=0)
+        # 키워드 3개만 써서 확인
+        list(p.collect_nearby(37.5, 127.0, area, 500, keywords=("한식", "중식", "일식")))
+
+    def test_지역_하나면_키워드_수만큼(self):
+        self._collect("공덕동")
+        self.assertEqual(self.queries, ["공덕동 한식", "공덕동 중식", "공덕동 일식"])
+
+    def test_지역_셋이면_세_배로_훑는다(self):
+        self._collect("공덕동, 염리동, 도화동")
+        self.assertEqual(len(self.queries), 9)
+        self.assertIn("염리동 중식", self.queries)
+        self.assertIn("도화동 일식", self.queries)
+
+    def test_빈_지역은_무시한다(self):
+        self._collect("공덕동, , 염리동,")
+        self.assertEqual(len(self.queries), 6)
+
+    def test_지역이_아예_없으면_키워드만으로_찾는다(self):
+        self._collect("")
+        self.assertEqual(self.queries, ["한식", "중식", "일식"])

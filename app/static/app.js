@@ -697,6 +697,41 @@ function initEvents() {
     } catch (e) { alert(e.message); }
   });
 
+  $('#add-query').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') $('#add-search').click();
+  });
+
+  $('#add-search').addEventListener('click', async () => {
+    const box = $('#add-results');
+    const query = $('#add-query').value.trim();
+    if (!query) return alert('상호명을 넣어 주세요.');
+    box.replaceChildren(el('div', { class: 'preview-head' }, '찾는 중…'));
+    box.hidden = false;
+    try {
+      const data = await api('/api/places/search', { method: 'POST', body: { query } });
+      box.replaceChildren(
+        el('div', { class: 'preview-head' }, '추가할 곳을 고르세요'),
+        ...data.items.map((it) => el('button', {
+          class: 'ghost',
+          style: 'display:block;width:100%;text-align:left;margin:4px 0',
+          onclick: async () => {
+            try {
+              await api('/api/places', { method: 'POST', body: {
+                name: it.name, address: it.address, category: it.category,
+                lat: it.lat, lng: it.lng,
+              } });
+              box.hidden = true;
+              $('#add-query').value = '';
+              $('#add-msg').textContent = `${it.name} 추가했습니다 (${it.distance_m}m).`;
+              await Promise.all([loadPlaces(), loadStats()]);
+            } catch (e) { alert(e.message); }
+          },
+        }, `${it.name} — ${it.address} · ${it.distance_m}m`)));
+    } catch (e) {
+      box.replaceChildren(el('div', { class: 'warn' }, e.message));
+    }
+  });
+
   $('#add-place').addEventListener('click', async () => {
     const [lat, lng] = ($('#add-coord').value || '').split(',').map((v) => parseFloat(v.trim()));
     try {

@@ -424,6 +424,44 @@ def post_office_lookup(h: "LunchHandler", q, body):
     return {"items": out}
 
 
+@route("POST", "/api/places/search")
+def post_place_search(h: "LunchHandler", q, body):
+    """상호명으로 식당을 찾아 후보를 돌려준다. 등록하지는 않는다.
+
+    지역검색 API 는 한 질의에 5건만 주기 때문에, 키워드로 훑는 '주변 식당 수집'
+    으로는 top 5 에 못 든 집이 통째로 빠진다. 이름을 아는 집은 이렇게 집어넣는
+    편이 빠르고 호출도 1건이면 끝난다.
+    """
+    s = h.state
+    query = (body.get("query") or "").strip()
+    if len(query) < 2:
+        raise ApiError(400, "상호명을 2글자 이상 넣어 주세요.")
+    try:
+        provider = _naver_provider(s)
+        items = provider.search(f"{s.area_keyword.split(',')[0].strip()} {query}".strip(), display=5)
+        if not items:
+            items = provider.search(query, display=5)
+    except ProviderError as exc:
+        raise ApiError(400, str(exc)) from exc
+
+    out = []
+    for item in items:
+        coords = parse_naver_coords(item.get("mapx"), item.get("mapy"))
+        if coords is None:
+            continue
+        lat, lng = coords
+        out.append({
+            "name": strip_tags(item.get("title")),
+            "address": (item.get("roadAddress") or item.get("address") or "").strip(),
+            "category": item.get("category", "") or "",
+            "lat": round(lat, 7), "lng": round(lng, 7),
+            "distance_m": round(haversine_m(*s.office, lat, lng)),
+        })
+    if not out:
+        raise ApiError(404, f"'{query}' 을(를) 찾지 못했습니다.")
+    return {"items": out}
+
+
 @route("POST", "/api/lunch-open/reset")
 def post_lunch_open_reset(h: "LunchHandler", q, body):
     """'점심 안 함' 표시를 한꺼번에 지운다.

@@ -162,8 +162,15 @@ class NaverLocalProvider:
         seen: set[str] = set()
         office = (office_lat, office_lng)
         failures: list[str] = []
-        for idx, keyword in enumerate(keywords, start=1):
-            query = f"{area_keyword} {keyword}".strip()
+
+        # 지역검색 API 는 한 질의에 최대 5건만 준다. 그래서 '공덕동 중식' 하나로는
+        # 그 동네 중식당 5곳밖에 못 본다. 지역을 쉼표로 여러 개 주면 그만큼
+        # 다른 5곳씩을 더 볼 수 있다. ('공덕동, 염리동, 도화동' 처럼)
+        areas = [a.strip() for a in (area_keyword or "").split(",") if a.strip()] or [""]
+        pairs = [(a, k) for k in keywords for a in areas]
+
+        for idx, (area, keyword) in enumerate(pairs, start=1):
+            query = f"{area} {keyword}".strip()
             try:
                 items = self.search(query)
             except BudgetExhausted:
@@ -171,7 +178,7 @@ class NaverLocalProvider:
             except ProviderError as exc:
                 failures.append(str(exc))
                 if on_progress:
-                    on_progress(idx, len(keywords), query, f"실패: {exc}")
+                    on_progress(idx, len(pairs), query, f"실패: {exc}")
                 # 처음 몇 번이 내리 실패하면 키나 주소 문제다. 76번을 헛돌 이유가 없다.
                 if len(failures) >= 3 and not seen:
                     raise ProviderError(
@@ -189,7 +196,7 @@ class NaverLocalProvider:
                 found += 1
                 yield place
             if on_progress:
-                on_progress(idx, len(keywords), query, f"{found}곳 추가")
+                on_progress(idx, len(pairs), query, f"{found}곳 추가")
             time.sleep(self.request_delay)
 
         if failures and not seen:
